@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # 04:15 UTC daily. The point of a nightly is to catch upstream pm3
+    # changes breaking the Android cross-build before a user does, so it
+    # tracks PM3_REF rather than a pinned commit.
+    - cron: "15 4 * * *"
 
 env:
   # Pinned so a toolchain bump is a visible commit rather than a silent
@@ -200,3 +205,57 @@ jobs:
         with:
           files: release/*
           generate_release_notes: true
+
+  # ---------------------------------------------------------------------
+  # Nightly: republish a rolling `nightly` prerelease from master.
+  # ---------------------------------------------------------------------
+  nightly:
+    runs-on: ubuntu-latest
+    needs: [apk, firmware]
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten
+        run: |
+          mkdir -p release
+          find dist -name '*.apk' -exec cp {} release/ \;
+          for dir in dist/firmware/*/; do
+            id=$(basename "$dir")
+            [ -f "$dir/fullimage.elf" ] && cp "$dir/fullimage.elf" "release/fullimage-$id.elf"
+            [ -f "$dir/bootrom.elf" ] && cp "$dir/bootrom.elf" "release/bootrom-$id.elf"
+          done
+          cp dist/firmware/manifest.json release/ 2>/dev/null || true
+          ls -lh release
+
+      - name: Move the nightly tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A rolling tag, repointed at whatever master is tonight. Deleting
+          # the release first keeps its asset list from accumulating stale
+          # APKs across runs -- uploads are additive otherwise.
+          gh release delete nightly --yes --cleanup-tag || true
+          git tag -f nightly
+          git push -f origin nightly
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "Nightly (${{ github.sha }})"
+          body: |
+            Rolling build from `master`, rebuilt nightly against
+            `${{ env.PM3_REPO }}@${{ env.PM3_REF }}`.
+
+            Untested against hardware by CI -- treat firmware here as
+            unverified, and prefer a tagged release if you have one.
+          prerelease: true
+          files: release/*
