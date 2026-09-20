@@ -1,0 +1,21 @@
+# Native cross-build output
+native/out/
+native/toolchains/
+
+# Firmware build matrix output
+firmware/out/
+
+# Gradle / Android
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+.idea/
+captures/
+
+# Staged build products (regenerate with native/build-pm3.sh)
+app/src/main/jniLibs/
+app/src/main/assets/pm3-resources.zip

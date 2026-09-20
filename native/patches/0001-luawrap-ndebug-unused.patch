@@ -1,0 +1,12 @@
+diff --git a/client/src/pm3_luawrap.c b/client/src/pm3_luawrap.c
+index 0d5753a9d..38db2532d 100644
+--- a/client/src/pm3_luawrap.c
++++ b/client/src/pm3_luawrap.c
+@@ -2032,6 +2032,7 @@ SWIGINTERN void  SWIG_Lua_add_class_instance_details(lua_State *L, swig_lua_clas
+         lua_rawseti(L, -2, i + 1); /* In lua indexing starts from 1 */
+         bases_count++;
+     }
++    (void)bases_count;  /* only consumed by the assert below; unused under NDEBUG */
+     assert(lua_rawlen(L, -1) == bases_count);
+     lua_pop(L, 1); /* remove .bases table */
+     /* add attributes */
