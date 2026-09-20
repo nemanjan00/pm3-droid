@@ -8,12 +8,12 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import io.github.nemanjan00.pm3.MainViewModel
 import io.github.nemanjan00.pm3.bridge.BridgeService
 import io.github.nemanjan00.pm3.flash.Flasher
-import java.io.File
 
 @Composable
 fun FlashScreen(viewModel: MainViewModel, state: BridgeService.State) {
@@ -21,7 +21,8 @@ fun FlashScreen(viewModel: MainViewModel, state: BridgeService.State) {
     var selected by remember { mutableStateOf<FirmwareVariant?>(null) }
     var confirming by remember { mutableStateOf(false) }
 
-    val variants = remember { FirmwareCatalog.bundled() }
+    val context = LocalContext.current
+    val variants = remember { FirmwareCatalog.load(context) }
     val running = state as? BridgeService.State.Running
     val canFlash = running?.flashable == true
 
@@ -52,6 +53,17 @@ fun FlashScreen(viewModel: MainViewModel, state: BridgeService.State) {
             style = MaterialTheme.typography.bodySmall,
         )
 
+        if (variants.isEmpty()) {
+            Banner(
+                "No firmware downloaded yet.\n\n" +
+                    "Images are published by the firmware matrix build rather " +
+                    "than bundled in the app, so they can be updated without an " +
+                    "app release. Fetch a release's manifest.json and images into " +
+                    "${FirmwareCatalog.cacheDir(context)}.",
+                MaterialTheme.colorScheme.surfaceVariant,
+            )
+        }
+
         variants.forEach { variant ->
             Card(
                 colors = if (selected == variant)
@@ -65,7 +77,8 @@ fun FlashScreen(viewModel: MainViewModel, state: BridgeService.State) {
                             Text(variant.description)
                             Text(
                                 variant.platform +
-                                    if (variant.extras.isNotEmpty()) " · ${variant.extras}" else "",
+                                    (if (variant.extras.isNotEmpty()) " · ${variant.extras}" else "") +
+                                    (if (variant.isAvailable) "" else " · not downloaded"),
                                 style = MaterialTheme.typography.labelSmall,
                             )
                         }
@@ -73,6 +86,7 @@ fun FlashScreen(viewModel: MainViewModel, state: BridgeService.State) {
                     trailingContent = {
                         RadioButton(
                             selected = selected == variant,
+                            enabled = variant.isAvailable,
                             onClick = { selected = variant },
                         )
                     },
@@ -82,7 +96,8 @@ fun FlashScreen(viewModel: MainViewModel, state: BridgeService.State) {
 
         Button(
             onClick = { confirming = true },
-            enabled = canFlash && selected != null && progress !is Flasher.Progress.Step,
+            enabled = canFlash && selected?.isAvailable == true &&
+                progress !is Flasher.Progress.Step,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Flash ${selected?.id ?: "…"}") }
 
@@ -125,7 +140,8 @@ fun FlashScreen(viewModel: MainViewModel, state: BridgeService.State) {
             confirmButton = {
                 TextButton(onClick = {
                     confirming = false
-                    viewModel.flash(File(variant.path))
+                    val image = variant.image
+                    if (image != null) viewModel.flash(image)
                 }) { Text("Flash") }
             },
             dismissButton = {

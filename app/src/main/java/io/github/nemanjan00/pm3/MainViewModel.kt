@@ -10,6 +10,7 @@ import io.github.nemanjan00.pm3.bridge.TcpBridge
 import io.github.nemanjan00.pm3.client.Pm3Runtime
 import io.github.nemanjan00.pm3.client.Pm3Session
 import io.github.nemanjan00.pm3.flash.Flasher
+import io.github.nemanjan00.pm3.transport.BleScanner
 import io.github.nemanjan00.pm3.transport.BleSppTransport
 import io.github.nemanjan00.pm3.transport.BtSppTransport
 import io.github.nemanjan00.pm3.transport.UsbTransport
@@ -39,6 +40,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _flashProgress = MutableStateFlow<Flasher.Progress?>(null)
     val flashProgress: StateFlow<Flasher.Progress?> = _flashProgress
 
+    private val _scanning = MutableStateFlow(false)
+    val scanning: StateFlow<Boolean> = _scanning
+
+    private val bleScanner = BleScanner(app)
+
     private var service: BridgeService? = null
     private var session: Pm3Session? = null
 
@@ -53,6 +59,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             usb = UsbTransport.list(context),
             bonded = BtSppTransport.bonded(context),
         )
+    }
+
+    /** Scans for a Proxmark5 BWM, which advertises the 0xAE86 SPP service. */
+    fun scanBle() {
+        if (_scanning.value) return
+        _scanning.value = true
+        bleScanner.start(
+            onResult = { list -> _devices.value = _devices.value.copy(scanned = list) },
+            onFinished = {
+                _scanning.value = false
+                if (_devices.value.scanned.isEmpty()) {
+                    append("[=] No BWM found. Check the module is powered and the " +
+                        "Proxmark5 runs firmware built with PLATFORM_EXTRAS=BWM.")
+                }
+            },
+        )
+    }
+
+    fun stopScan() {
+        bleScanner.stop()
+        _scanning.value = false
     }
 
     fun connectUsb(device: UsbDevice) {
@@ -142,6 +169,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        bleScanner.stop()
         stopSession()
         super.onCleared()
     }

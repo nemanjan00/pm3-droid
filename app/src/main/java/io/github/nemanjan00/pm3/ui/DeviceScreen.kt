@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,6 +23,7 @@ import io.github.nemanjan00.pm3.transport.UsbTransport
 fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
     val context = LocalContext.current
     val devices by viewModel.devices.collectAsState()
+    val scanning by viewModel.scanning.collectAsState()
     val termux = remember { TermuxIntegration(context) }
 
     Column(
@@ -84,16 +86,35 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
             subtitle = "Proxmark5 BWM. No pairing needed. " +
                 "Needs firmware built with PLATFORM_EXTRAS=BWM.",
         ) {
-            if (devices.scanned.isEmpty()) {
+            if (devices.scanned.isEmpty() && !scanning) {
                 EmptyRow("Scan to find a Proxmark5 advertising the BWM SPP service.")
             }
             devices.scanned.forEach { device ->
                 DeviceRow(
-                    icon = Icons.Filled.BluetoothSearching,
+                    icon = Icons.AutoMirrored.Filled.BluetoothSearching,
                     title = device.name ?: device.address,
                     subtitle = device.address,
                     onClick = { viewModel.connectBle(device) },
                 )
+            }
+
+            if (scanning) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Scanning…", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { viewModel.stopScan() }) { Text("Stop") }
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { viewModel.scanBle() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.BluetoothSearching, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Scan for BWM")
+                }
             }
         }
 

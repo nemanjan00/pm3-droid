@@ -4,7 +4,11 @@ import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.content.ServiceConnection
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -15,6 +19,7 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import io.github.nemanjan00.pm3.bridge.BridgeService
 import io.github.nemanjan00.pm3.ui.Pm3App
 
@@ -37,6 +42,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Result of the system's USB permission prompt.
+     *
+     * UsbManager.requestPermission answers by broadcast, not by activity
+     * result, so this is the only way to know the user said yes -- and it is
+     * where the connection is actually made.
+     */
+    private val usbPermissionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != usbPermissionAction()) return
+            val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+            val device: UsbDevice? =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                }
+            if (granted && device != null) viewModel.connectUsb(device)
+            viewModel.refreshDevices()
+        }
+    }
+
+    private fun usbPermissionAction() = getString(R.string.usb_permission)
+
     private val requestPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { viewModel.refreshDevices() }
@@ -49,6 +79,15 @@ class MainActivity : ComponentActivity() {
             Intent(this, BridgeService::class.java),
             connection,
             Context.BIND_AUTO_CREATE,
+        )
+
+        // RECEIVER_NOT_EXPORTED: only the system's own permission response
+        // should reach this, never another app.
+        ContextCompat.registerReceiver(
+            this,
+            usbPermissionReceiver,
+            IntentFilter(usbPermissionAction()),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
         )
 
         requestPermissions.launch(requiredPermissions())
@@ -81,6 +120,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(usbPermissionReceiver) }
         runCatching { unbindService(connection) }
         super.onDestroy()
     }

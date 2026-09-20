@@ -2,6 +2,7 @@ package io.github.nemanjan00.pm3.transport
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
 import android.content.Context
@@ -38,7 +39,7 @@ class BtSppTransport(
     private var output: OutputStream? = null
 
     override fun open() {
-        val adapter = BluetoothAdapter.getDefaultAdapter()
+        val adapter = adapterOf(context)
             ?: throw TransportException("No Bluetooth adapter")
 
         val s = try {
@@ -112,7 +113,7 @@ class BtSppTransport(
         }
 
         fun bonded(context: Context): List<BluetoothDevice> {
-            val adapter = BluetoothAdapter.getDefaultAdapter() ?: return emptyList()
+            val adapter = adapterOf(context) ?: return emptyList()
             return try {
                 adapter.bondedDevices.orEmpty().toList()
                     .sortedByDescending { looksLikeProxmark(it) }
