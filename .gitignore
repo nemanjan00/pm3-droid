@@ -13,6 +13,10 @@ local.properties
 *.aab
 *.keystore
 !debug.keystore
+
+# Release signing material. The keystore IS the app's identity -- if this is
+# ever committed, the key is burned and every future update is compromised.
+secrets/
 .idea/
 captures/
 

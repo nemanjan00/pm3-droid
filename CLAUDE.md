@@ -96,6 +96,25 @@ shim's type tags — command output can legitimately be JSON.
 Ported from node-proxmark3's `interpreter.lua`, using the `dkjson` already in
 the client's `lualibs` rather than a vendored copy.
 
+## Signing
+
+`tools/make-release-key.sh` generates the key into `secrets/` (gitignored,
+mode 700); `tools/push-signing-secrets.sh` uploads it via `gh`. Neither script
+echoes key material — passwords reach `gh` on stdin, never argv, where they
+would show up in shell history and the process table.
+
+The key cannot be rotated: Android ties update eligibility to the signing
+certificate. `make-release-key.sh` refuses to overwrite an existing keystore
+for that reason.
+
+`app/build.gradle.kts` signs only when `secrets/release.properties` exists, so
+a fresh clone still builds. CI supplies the same values as secrets and then
+*verifies* the result with apksigner — a missing or misspelled secret must
+fail the job, not silently upload an unsigned APK.
+
+Current certificate SHA-256:
+`69:B1:6F:A0:E2:DD:13:27:10:5C:CB:B0:A0:C8:20:65:19:06:8C:50:9F:3F:8B:5C:4A:B7:65:7C:2D:AE:0E:94`
+
 ## Firmware delivery
 
 Images ship via the CI release, not in the APK. `FirmwareRepository` fetches

@@ -1,8 +1,21 @@
+// Explicit import: in the Kotlin DSL `java` resolves to Gradle's own `java`
+// extension, which shadows the java.* package.
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+// Release signing, when secrets/release.properties exists (see
+// tools/make-release-key.sh). Absent -- on a fresh clone, or in CI, where the
+// key arrives as secrets instead -- the release build stays unsigned rather
+// than failing, so anyone can still build and diff the output.
+val releaseKeystoreProperties: Properties? =
+    file("../secrets/release.properties").takeIf { it.exists() }?.let { propertiesFile ->
+        Properties().apply { propertiesFile.inputStream().use { load(it) } }
+    }
 
 android {
     namespace = "io.github.nemanjan00.pm3"
@@ -25,8 +38,27 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseKeystoreProperties != null) {
+            create("release") {
+                storeFile = file(releaseKeystoreProperties.getProperty("storeFile"))
+                storePassword = releaseKeystoreProperties.getProperty("storePassword")
+                keyAlias = releaseKeystoreProperties.getProperty("keyAlias")
+                keyPassword = releaseKeystoreProperties.getProperty("keyPassword")
+                // v1 off: minSdk is 26, so every target supports v2/v3, and
+                // a v1 signature is the weaker one attackers target.
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseKeystoreProperties != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

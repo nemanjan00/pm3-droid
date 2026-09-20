@@ -91,6 +91,32 @@ If a flash is interrupted the device stays in bootloader mode and you can
 simply retry; the bootloader itself is not rewritten unless you explicitly ask
 for it.
 
+## Release signing
+
+The signing key **is** the app's identity on Android. Once someone installs an
+APK signed with it, every later update must carry the same key — there is no
+migration path except uninstall and reinstall, losing app data. Generate it
+once, back it up, never commit it.
+
+```sh
+./tools/make-release-key.sh        # writes secrets/ (gitignored)
+./tools/push-signing-secrets.sh    # uploads it to GitHub Actions secrets
+```
+
+The first prints the certificate fingerprint — that part is public, and it is
+what users compare to check an APK really came from you.
+
+Local release builds pick `secrets/release.properties` up automatically. CI
+reads the same material from four repository secrets (`KEYSTORE_B64`,
+`KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`); with none configured it
+builds unsigned rather than failing, so anyone can still build and diff the
+output. When they *are* configured, CI verifies the signature and fails if the
+APK came out unsigned — otherwise a misspelled secret ships a broken release
+that only a user's failed install would reveal.
+
+Signatures are v2+v3 only. minSdk is 26, so every target supports them, and v1
+is the weaker scheme.
+
 ## Termux
 
 This is **not** a Termux plugin in the strict sense, and it cannot be. A real

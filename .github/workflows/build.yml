@@ -137,6 +137,38 @@ jobs:
             ./gradlew :app:assembleRelease
           fi
 
+      - name: Verify release signature
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          # If a keystore secret was supplied, the release APK must actually
+          # be signed with it. Without this the job happily uploads an
+          # unsigned APK when a secret is missing or misspelled, and that is
+          # only noticed by a user whose install fails.
+          shopt -s nullglob
+          signed=(app/build/outputs/apk/release/*-release.apk)
+          unsigned=(app/build/outputs/apk/release/*-release-unsigned.apk)
+
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "No keystore secret configured; release APKs are unsigned by design."
+            [ ${#unsigned[@]} -gt 0 ] || { echo "Expected unsigned APKs, found none" >&2; exit 1; }
+            exit 0
+          fi
+
+          if [ ${#signed[@]} -eq 0 ]; then
+            echo "KEYSTORE_B64 is set but no signed APK was produced." >&2
+            echo "Check KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD." >&2
+            ls -l app/build/outputs/apk/release/ >&2
+            exit 1
+          fi
+
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          for apk in "${signed[@]}"; do
+            echo "== $apk"
+            "$apksigner" verify --verbose --print-certs "$apk" \
+              | grep -E "^Verifies|v2 scheme|v3 scheme|certificate SHA-256"
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: apk
