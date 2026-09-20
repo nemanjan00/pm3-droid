@@ -150,8 +150,13 @@ first yields an unsigned APK, the second a perfectly valid signature from the
 wrong key, which only a pinned fingerprint catches.
 
 Local release builds pick `secrets/release.properties` up automatically. CI
-reads the same material from four repository secrets (`KEYSTORE_B64`,
-`KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`); with none configured it
+reconstructs that same file from three repository secrets (`KEYSTORE_B64`,
+`KEYSTORE_PASSWORD`, `KEY_PASSWORD`) plus a `KEY_ALIAS` **variable** — one
+signing path, so CI and local cannot drift. The alias is deliberately not a
+secret: GitHub masks a secret's value everywhere, and an alias of `release`
+turns every logged path into `app/build/outputs/apk/***/app-***.apk`.
+
+With no keystore configured it
 builds unsigned rather than failing, so anyone can still build and diff the
 output. When they *are* configured, CI verifies the signature and fails if the
 APK came out unsigned — otherwise a misspelled secret ships a broken release

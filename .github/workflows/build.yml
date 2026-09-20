@@ -128,20 +128,35 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          # Not a secret: an alias is not sensitive, and making it one means
+          # GitHub masks that word everywhere -- an alias of "release" turns
+          # every log path into app/build/outputs/apk/***/app-***.apk.
+          KEY_ALIAS: ${{ vars.KEY_ALIAS || 'release' }}
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-            ./gradlew :app:assembleRelease \
-              -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.keystore" \
-              -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
-              -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
-              -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+            # Reconstruct secrets/release.properties rather than passing
+            # -Pandroid.injected.signing.*. The injected path builds its own
+            # signing config and ignores the enableV1/V2/V3 settings in
+            # build.gradle.kts, so CI was producing v2-only APKs while local
+            # builds got v2+v3. One code path, one result.
+            mkdir -p secrets
+            echo "$KEYSTORE_B64" | base64 -d > secrets/release.keystore
+            cat > secrets/release.properties <<EOF
+          storeFile=$GITHUB_WORKSPACE/secrets/release.keystore
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+            ./gradlew :app:assembleRelease
           else
             echo "No signing keystore configured; building unsigned."
             ./gradlew :app:assembleRelease
           fi
+
+      - name: Remove signing material from the workspace
+        if: always()
+        run: rm -rf secrets
 
       - name: Verify release signature
         env:
@@ -174,7 +189,17 @@ jobs:
             out=$("$apksigner" verify --verbose --print-certs "$apk")
             echo "$out" | grep -E "^Verifies|v2 scheme|v3 scheme|certificate SHA-256"
 
-            got=$(echo "$out" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+            # apksigner labels this "Signer #1 certificate SHA-256 digest:"
+            # when the schemes agree, but "V2 Signer: certificate SHA-256
+            # digest:" when only some are present -- match either.
+            got=$(echo "$out" \
+              | sed -n 's/.*certificate SHA-256 digest: *//p' \
+              | sort -u)
+            if [ "$(echo "$got" | wc -l)" -ne 1 ]; then
+              echo "Expected one signing certificate, found:" >&2
+              echo "$got" >&2
+              exit 1
+            fi
             if [ "$got" != "$EXPECTED_CERT_SHA256" ]; then
               echo "Certificate mismatch for $apk" >&2
               echo "  expected $EXPECTED_CERT_SHA256" >&2
