@@ -27,6 +27,22 @@ The socket binds to `127.0.0.1` only. The Proxmark protocol is
 unauthenticated, so exposing it on the network would hand the reader to anyone
 on the same Wi-Fi.
 
+## What CI produces
+
+| Trigger | Jobs that run | Output |
+|---|---|---|
+| push / PR | `client`, `apk`, `firmware` | APKs and firmware as job artifacts |
+| manual run on the default branch | + `nightly` | rolling `nightly` prerelease |
+| 04:15 UTC daily | + `nightly` | rolling `nightly` prerelease |
+| push a `v*` tag | + `release` | a published release |
+
+`release` and `nightly` showing as *skipped* on an ordinary push is expected —
+they are gated, not broken. To cut an actual release:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
 ## Repository layout
 
 | Path | What it is |

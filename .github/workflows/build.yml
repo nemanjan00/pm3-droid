@@ -247,14 +247,22 @@ jobs:
           generate_release_notes: true
 
   # ---------------------------------------------------------------------
-  # Nightly: republish a rolling `nightly` prerelease from master.
+  # Nightly: republish a rolling `nightly` prerelease from the default branch.
+  #
+  # Skipped on an ordinary push -- that is expected. A push builds and uploads
+  # APKs as job artifacts; only the schedule, a manual run, or a v* tag
+  # publishes a release.
   # ---------------------------------------------------------------------
   nightly:
     runs-on: ubuntu-latest
     needs: [apk, firmware]
+    # Compared against the repository's actual default branch rather than a
+    # hardcoded "master": the push trigger accepts master or main, so pinning
+    # one here means a branch rename silently stops manual nightlies.
     if: >-
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     permissions:
       contents: write
     steps:
