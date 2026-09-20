@@ -230,7 +230,17 @@ jobs:
       - name: Flatten
         run: |
           mkdir -p release
-          find dist -name '*.apk' -exec cp {} release/ \;
+          # Release APKs only. The artifact also carries the debug builds,
+          # which are signed with the throwaway debug key -- publishing them
+          # next to the real ones invites someone to install the wrong APK.
+          find dist -path '*/release/*' -name '*-release.apk' -exec cp {} release/ \;
+          if [ -z "$(ls -A release)" ]; then
+            echo "No signed release APKs to publish." >&2
+            echo "An unsigned APK cannot be installed, so publishing one is never useful." >&2
+            echo "Configure the signing secrets: tools/push-signing-secrets.sh" >&2
+            find dist -name '*.apk' >&2
+            exit 1
+          fi
           # Firmware images share a filename across variants, so keep the
           # variant id in the released name.
           for dir in dist/firmware/*/; do
@@ -275,7 +285,17 @@ jobs:
       - name: Flatten
         run: |
           mkdir -p release
-          find dist -name '*.apk' -exec cp {} release/ \;
+          # Release APKs only. The artifact also carries the debug builds,
+          # which are signed with the throwaway debug key -- publishing them
+          # next to the real ones invites someone to install the wrong APK.
+          find dist -path '*/release/*' -name '*-release.apk' -exec cp {} release/ \;
+          if [ -z "$(ls -A release)" ]; then
+            echo "No signed release APKs to publish." >&2
+            echo "An unsigned APK cannot be installed, so publishing one is never useful." >&2
+            echo "Configure the signing secrets: tools/push-signing-secrets.sh" >&2
+            find dist -name '*.apk' >&2
+            exit 1
+          fi
           for dir in dist/firmware/*/; do
             id=$(basename "$dir")
             [ -f "$dir/fullimage.elf" ] && cp "$dir/fullimage.elf" "release/fullimage-$id.elf"

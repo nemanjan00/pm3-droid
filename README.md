@@ -37,7 +37,15 @@ on the same Wi-Fi.
 | push a `v*` tag | + `release` | a published release |
 
 `release` and `nightly` showing as *skipped* on an ordinary push is expected —
-they are gated, not broken. To cut an actual release:
+they are gated, not broken.
+
+Published releases carry only the **signed release** APKs; the debug builds
+stay as job artifacts, since publishing debug-key APKs beside the real ones
+just invites installing the wrong one. If the signing secrets are missing the
+publish fails rather than uploading unsigned APKs, which cannot be installed
+anyway.
+
+To cut an actual release:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
