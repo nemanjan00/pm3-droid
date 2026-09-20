@@ -44,7 +44,9 @@ jobs:
 
       - name: Install NDK
         run: |
-          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          [ -n "$sdk" ] || { echo "Neither ANDROID_HOME nor ANDROID_SDK_ROOT is set" >&2; exit 1; }
+          yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" \
             --install "ndk;${NDK_VERSION}" "cmake;3.22.1"
 
       - name: Install ninja
@@ -53,9 +55,15 @@ jobs:
       - name: Build client
         env:
           PM3_SRC: ${{ github.workspace }}/proxmark3
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-          ABI: ${{ matrix.abi }}
-        run: ./native/build-pm3.sh "${{ matrix.abi }}"
+        run: |
+          # ANDROID_HOME is exported into the runner's shell, not into the
+          # workflow's `env` context -- ${{ env.ANDROID_HOME }} expands to the
+          # empty string, so it has to be read here instead.
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          [ -n "$sdk" ] || { echo "Neither ANDROID_HOME nor ANDROID_SDK_ROOT is set" >&2; exit 1; }
+          export ANDROID_NDK_HOME="$sdk/ndk/${NDK_VERSION}"
+          [ -d "$ANDROID_NDK_HOME" ] || { echo "NDK missing at $ANDROID_NDK_HOME" >&2; ls "$sdk/ndk" || true; exit 1; }
+          ./native/build-pm3.sh "${{ matrix.abi }}"
 
       - uses: actions/upload-artifact@v4
         with:

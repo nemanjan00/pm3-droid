@@ -93,9 +93,34 @@ shim's type tags — command output can legitimately be JSON.
 Ported from node-proxmark3's `interpreter.lua`, using the `dkjson` already in
 the client's `lualibs` rather than a vendored copy.
 
-## Untested
+## Firmware delivery
 
-No Proxmark hardware and no emulator were available while this was written.
-The cross-compile, the APK build and the firmware matrix are all verified;
-**everything that requires a device is not**. Treat first-run behaviour of the
-transports, the flasher and the Termux wrapper as unproven.
+Images ship via the CI release, not in the APK. `FirmwareRepository` fetches
+`manifest.json` plus `fullimage-<id>.elf` (the flattened names the release job
+produces), stages each through a `.part` file, and verifies sha256 before
+committing. Never relax that check: a truncated image still parses as an ELF
+and would be written to the device.
+
+`sync()` uses `channelFlow`, not `callbackFlow` — the early returns on failure
+would trip callbackFlow's "please call awaitClose" requirement. Milestones use
+suspending `send()`; only per-chunk progress uses `trySend`, where a dropped
+frame is harmless.
+
+## Verified vs unverified
+
+Verified locally, including a clean-room rehearsal of every CI job (fresh pm3
+clone, scripts run with the same env, artifact path-stripping simulated):
+
+- the client cross-compile for both ABIs
+- `assembleDebug` and `assembleRelease` (R8 + resource shrinking; the native
+  binary and assets survive both)
+- the firmware matrix
+- `actionlint` on the workflow
+
+**Not verified: anything needing hardware.** No Proxmark and no emulator were
+available. The transports, the flasher, the firmware download and the Termux
+wrapper are all unproven against a real device.
+
+One R8 note: usb-serial-for-android instantiates drivers reflectively, but its
+AAR ships a consumer keep rule for `com.hoho.android.usbserial.driver.*`, so
+`app/proguard-rules.pro` does not need to repeat it.

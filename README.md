@@ -69,6 +69,17 @@ Two build options decide whether wireless works at all:
 - **`BWM`** — required for the Proxmark5 to forward serial to the Battery
   Wireless Module.
 
+## Firmware delivery
+
+Images are **not** bundled in the APK — that would be several megabytes most
+users never touch, on a release cadence that should not be tied to the app's.
+The Flash tab downloads them from the CI release instead, and verifies each
+one against the manifest's sha256 before it becomes selectable. A truncated
+download still parses as an ELF, so the check is the difference between a
+failed download and a bricked reader.
+
+Point it at a different release with `FirmwareRepository(context, releaseBase)`.
+
 ## Flashing
 
 **USB only.** The app refuses to flash over Bluetooth, at three separate

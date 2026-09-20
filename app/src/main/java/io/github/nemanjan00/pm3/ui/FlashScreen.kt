@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import io.github.nemanjan00.pm3.MainViewModel
 import io.github.nemanjan00.pm3.bridge.BridgeService
+import io.github.nemanjan00.pm3.flash.FirmwareRepository
 import io.github.nemanjan00.pm3.flash.Flasher
 
 @Composable
@@ -22,7 +23,8 @@ fun FlashScreen(viewModel: MainViewModel, state: BridgeService.State) {
     var confirming by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
-    val variants = remember { FirmwareCatalog.load(context) }
+    val variants by viewModel.firmware.collectAsState()
+    val sync by viewModel.firmwareSync.collectAsState()
     val running = state as? BridgeService.State.Running
     val canFlash = running?.flashable == true
 
@@ -57,12 +59,33 @@ fun FlashScreen(viewModel: MainViewModel, state: BridgeService.State) {
             Banner(
                 "No firmware downloaded yet.\n\n" +
                     "Images are published by the firmware matrix build rather " +
-                    "than bundled in the app, so they can be updated without an " +
-                    "app release. Fetch a release's manifest.json and images into " +
-                    "${FirmwareCatalog.cacheDir(context)}.",
+                    "than bundled in the app, so they can be updated without " +
+                    "waiting for an app release.",
                 MaterialTheme.colorScheme.surfaceVariant,
             )
         }
+
+        when (val s = sync) {
+            is FirmwareRepository.Progress.Status ->
+                Text(s.message, style = MaterialTheme.typography.bodySmall)
+            is FirmwareRepository.Progress.Downloading -> {
+                Text("Downloading ${s.name}…", style = MaterialTheme.typography.bodySmall)
+                if (s.fraction != null) {
+                    LinearProgressIndicator({ s.fraction }, Modifier.fillMaxWidth())
+                } else {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }
+            is FirmwareRepository.Progress.Failed ->
+                Banner(s.message, MaterialTheme.colorScheme.errorContainer)
+            else -> Unit
+        }
+
+        OutlinedButton(
+            onClick = { viewModel.syncFirmware() },
+            enabled = sync !is FirmwareRepository.Progress.Downloading,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (variants.isEmpty()) "Download firmware" else "Check for updates") }
 
         variants.forEach { variant ->
             Card(

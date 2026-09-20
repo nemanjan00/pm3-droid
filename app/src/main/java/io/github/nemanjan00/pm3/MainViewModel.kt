@@ -10,6 +10,9 @@ import io.github.nemanjan00.pm3.bridge.TcpBridge
 import io.github.nemanjan00.pm3.client.Pm3Runtime
 import io.github.nemanjan00.pm3.client.Pm3Session
 import io.github.nemanjan00.pm3.flash.Flasher
+import io.github.nemanjan00.pm3.flash.FirmwareRepository
+import io.github.nemanjan00.pm3.ui.FirmwareCatalog
+import io.github.nemanjan00.pm3.ui.FirmwareVariant
 import io.github.nemanjan00.pm3.transport.BleScanner
 import io.github.nemanjan00.pm3.transport.BleSppTransport
 import io.github.nemanjan00.pm3.transport.BtSppTransport
@@ -39,6 +42,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _flashProgress = MutableStateFlow<Flasher.Progress?>(null)
     val flashProgress: StateFlow<Flasher.Progress?> = _flashProgress
+
+    private val _firmware = MutableStateFlow(FirmwareCatalog.load(app))
+    val firmware: StateFlow<List<FirmwareVariant>> = _firmware
+
+    private val _firmwareSync = MutableStateFlow<FirmwareRepository.Progress?>(null)
+    val firmwareSync: StateFlow<FirmwareRepository.Progress?> = _firmwareSync
 
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning
@@ -135,6 +144,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun stopSession() {
         session?.stop()
         session = null
+    }
+
+    /** Downloads the firmware manifest and any images not already cached. */
+    fun syncFirmware() {
+        if (_firmwareSync.value is FirmwareRepository.Progress.Downloading) return
+        viewModelScope.launch {
+            FirmwareRepository(getApplication()).sync().collect { progress ->
+                _firmwareSync.value = progress
+                when (progress) {
+                    is FirmwareRepository.Progress.Done -> {
+                        _firmware.value = progress.variants
+                        append("[+] Firmware synced: ${progress.variants.count { it.isAvailable }} " +
+                            "of ${progress.variants.size} images available")
+                    }
+                    is FirmwareRepository.Progress.Failed -> append("[!] ${progress.message}")
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    fun refreshFirmware() {
+        _firmware.value = FirmwareCatalog.load(getApplication())
     }
 
     fun flash(image: File, bootloader: Boolean = false) {
