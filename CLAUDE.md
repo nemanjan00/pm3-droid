@@ -58,8 +58,11 @@ Do not "fix" these without reading why:
 - The client ships as `jniLibs/<abi>/libproxmark3.so`. Since API 29 `exec()` is
   only permitted from `nativeLibraryDir`, and the packager only extracts files
   matching `lib*.so`. It is an executable, not a library — nothing loads it.
-- `extractNativeLibs=true` and `useLegacyPackaging = true` are both required:
-  the binary must be a real file on disk.
+- `useLegacyPackaging = true` in the packaging DSL is what makes the binary a
+  real file on disk; it emits `extractNativeLibs=true` into the merged
+  manifest. Do **not** also set that attribute in AndroidManifest.xml -- AGP
+  warns about the duplicate, and the DSL is the supported spelling. Verified:
+  the DSL alone yields `extractNativeLibs=true` in both debug and release.
 - `nativeLibraryDir` is read-only, so resources unpack to `$HOME/.proxmark3`,
   which the client already searches (`PM3_USER_DIRECTORY`, pm3's
   `include/common.h`). The app sets `HOME`; no client patch needed.

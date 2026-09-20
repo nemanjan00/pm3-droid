@@ -114,7 +114,7 @@ jobs:
           ls -lh app/src/main/jniLibs/*/ app/src/main/assets/
 
       - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon
+        run: ./gradlew :app:assembleDebug
 
       - name: Build release APK
         # Unsigned unless a keystore secret is configured; an unsigned
@@ -127,14 +127,14 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-            ./gradlew :app:assembleRelease --no-daemon \
+            ./gradlew :app:assembleRelease \
               -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.keystore" \
               -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
               -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
               -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
           else
             echo "No signing keystore configured; building unsigned."
-            ./gradlew :app:assembleRelease --no-daemon
+            ./gradlew :app:assembleRelease
           fi
 
       - uses: actions/upload-artifact@v4
