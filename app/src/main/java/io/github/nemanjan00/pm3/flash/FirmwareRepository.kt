@@ -12,7 +12,6 @@ import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.security.MessageDigest
 
 /**
  * Fetches firmware built by the matrix CI job.
@@ -80,7 +79,7 @@ class FirmwareRepository(
 
         for (variant in wanted) {
             val target = File(dir, "${variant.id}/fullimage.elf")
-            if (target.isFile && sha256(target).equals(variant.sha256, ignoreCase = true)) {
+            if (target.isFile && FirmwareCatalog.sha256(target).equals(variant.sha256, ignoreCase = true)) {
                 continue // already have a verified copy
             }
             target.parentFile?.mkdirs()
@@ -99,7 +98,7 @@ class FirmwareRepository(
                 return@channelFlow
             }
 
-            val digest = sha256(tmp)
+            val digest = FirmwareCatalog.sha256(tmp)
             if (variant.sha256.isNotEmpty() && !digest.equals(variant.sha256, ignoreCase = true)) {
                 // A truncated image still parses as an ELF; writing one to a
                 // Proxmark is exactly the failure this app must not cause.
@@ -159,19 +158,6 @@ class FirmwareRepository(
         } finally {
             connection.disconnect()
         }
-    }
-
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(1 shl 16)
-            while (true) {
-                val n = input.read(buffer)
-                if (n <= 0) break
-                digest.update(buffer, 0, n)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     companion object {

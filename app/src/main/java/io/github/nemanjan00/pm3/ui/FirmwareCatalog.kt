@@ -69,14 +69,19 @@ object FirmwareCatalog {
     }
 
     /**
-     * Verifies a downloaded image against the manifest's digest.
+     * Verifies an image on disk against the manifest's digest.
      *
-     * Worth doing: a truncated download that still parses as an ELF would be
-     * written to the device and brick it.
+     * Checked at download time and again immediately before flashing: the
+     * cache can rot between the two, and a truncated image still parses as an
+     * ELF, so nothing else would catch it before it reached the device.
      */
     fun verify(variant: FirmwareVariant): Boolean {
         val file = variant.image ?: return false
         if (variant.sha256.isEmpty()) return true
+        return sha256(file).equals(variant.sha256, ignoreCase = true)
+    }
+
+    fun sha256(file: File): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(1 shl 16)
@@ -87,6 +92,5 @@ object FirmwareCatalog {
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
-            .equals(variant.sha256, ignoreCase = true)
     }
 }

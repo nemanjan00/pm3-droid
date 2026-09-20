@@ -163,8 +163,7 @@ fun FlashScreen(viewModel: MainViewModel, state: BridgeService.State) {
             confirmButton = {
                 TextButton(onClick = {
                     confirming = false
-                    val image = variant.image
-                    if (image != null) viewModel.flash(image)
+                    viewModel.flashVerified(variant)
                 }) { Text("Flash") }
             },
             dismissButton = {

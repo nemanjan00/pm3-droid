@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -167,6 +168,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshFirmware() {
         _firmware.value = FirmwareCatalog.load(getApplication())
+    }
+
+    /**
+     * Re-verifies an image against the manifest, then flashes it.
+     *
+     * The download already checked the digest, but the cache can rot in
+     * between and nothing downstream would notice -- a truncated image still
+     * parses as an ELF.
+     */
+    fun flashVerified(variant: FirmwareVariant, bootloader: Boolean = false) {
+        val image = variant.image
+        if (image == null) {
+            append("[!] ${variant.id} is not downloaded")
+            return
+        }
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { FirmwareCatalog.verify(variant) }
+            if (!ok) {
+                append("[!] ${variant.id} no longer matches its manifest digest. " +
+                    "Re-download it before flashing.")
+                return@launch
+            }
+            flash(image, bootloader)
+        }
     }
 
     fun flash(image: File, bootloader: Boolean = false) {
