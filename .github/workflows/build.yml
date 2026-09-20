@@ -19,6 +19,12 @@ env:
   ARM_TOOLCHAIN_VERSION: "13.3.rel1"
   PM3_REPO: RfidResearchGroup/proxmark3
   PM3_REF: master
+  # The release signing certificate, as apksigner prints it. Public
+  # information -- it is what a user compares to check an APK is genuinely
+  # ours. Pinned here so CI fails if the APK is ever signed by a different
+  # key: a missing secret is caught by the unsigned check below, but a
+  # *swapped* one would otherwise sail through as a perfectly valid signature.
+  EXPECTED_CERT_SHA256: "69b16fa0e2dd1327105ccbb0a0c8206519068c509f3f8b5c4ab7657c2dae0e94"
 
 jobs:
   # ---------------------------------------------------------------------
@@ -165,9 +171,26 @@ jobs:
           apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           for apk in "${signed[@]}"; do
             echo "== $apk"
-            "$apksigner" verify --verbose --print-certs "$apk" \
-              | grep -E "^Verifies|v2 scheme|v3 scheme|certificate SHA-256"
+            out=$("$apksigner" verify --verbose --print-certs "$apk")
+            echo "$out" | grep -E "^Verifies|v2 scheme|v3 scheme|certificate SHA-256"
+
+            got=$(echo "$out" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+            if [ "$got" != "$EXPECTED_CERT_SHA256" ]; then
+              echo "Certificate mismatch for $apk" >&2
+              echo "  expected $EXPECTED_CERT_SHA256" >&2
+              echo "  got      $got" >&2
+              echo "Either the signing secrets point at a different key, or" >&2
+              echo "EXPECTED_CERT_SHA256 needs updating for a deliberate rotation." >&2
+              exit 1
+            fi
+
+            # v1 is disabled on purpose; v2+v3 must both be present.
+            echo "$out" | grep -q "v2 scheme (APK Signature Scheme v2): true" \
+              || { echo "$apk is missing a v2 signature" >&2; exit 1; }
+            echo "$out" | grep -q "v3 scheme (APK Signature Scheme v3): true" \
+              || { echo "$apk is missing a v3 signature" >&2; exit 1; }
           done
+          echo "All release APKs signed by the expected certificate."
 
       - uses: actions/upload-artifact@v4
         with:

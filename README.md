@@ -130,6 +130,25 @@ once, back it up, never commit it.
 The first prints the certificate fingerprint — that part is public, and it is
 what users compare to check an APK really came from you.
 
+### Verifying a download
+
+Every published APK is signed by this certificate:
+
+```
+SHA-256  69:B1:6F:A0:E2:DD:13:27:10:5C:CB:B0:A0:C8:20:65:19:06:8C:50:9F:3F:8B:5C:4A:B7:65:7C:2D:AE:0E:94
+```
+
+Check a downloaded APK against it:
+
+```sh
+apksigner verify --print-certs app-arm64-v8a-release.apk
+```
+
+CI pins the same value, so a build signed by any other key fails rather than
+publishing. A missing secret and a *swapped* one are different failures: the
+first yields an unsigned APK, the second a perfectly valid signature from the
+wrong key, which only a pinned fingerprint catches.
+
 Local release builds pick `secrets/release.properties` up automatically. CI
 reads the same material from four repository secrets (`KEYSTORE_B64`,
 `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`); with none configured it
