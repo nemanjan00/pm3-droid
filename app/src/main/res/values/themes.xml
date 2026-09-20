@@ -1,0 +1,7 @@
+<resources>
+    <!-- Compose supplies the real theme; this only needs to exist before
+         setContent runs, and must not draw a light background behind a dark UI. -->
+    <style name="Theme.Pm3" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/background_dark</item>
+    </style>
+</resources>
