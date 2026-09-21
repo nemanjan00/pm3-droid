@@ -136,6 +136,13 @@ class FirmwareRepository(
         }
         try {
             val code = connection.responseCode
+            if (code == 404) {
+                // Expected until the first release is published: GitHub
+                // serves 404 both for "no such release" and "no such asset".
+                throw IOException(
+                    "Not published yet (404). No release carries this file."
+                )
+            }
             if (code !in 200..299) throw IOException("HTTP $code for $url")
 
             val total = connection.contentLengthLong
@@ -161,14 +168,22 @@ class FirmwareRepository(
     }
 
     companion object {
+        private const val REPO = "https://github.com/nemanjan00/pm3-droid"
+
         /**
-         * The rolling nightly published by .github/workflows/build.yml.
+         * Assets of the latest *stable* release.
          *
-         * GitHub serves release assets from this path without an API call or a
-         * token, which keeps the app free of credentials.
+         * GitHub serves this path without an API call or a token, which keeps
+         * the app free of credentials, and redirects to the newest release
+         * that is not a prerelease -- so the rolling `nightly`, which the
+         * workflow publishes with prerelease: true, is correctly skipped.
+         * An installed app should track firmware that was actually released,
+         * not whatever master built last night.
          */
-        const val DEFAULT_RELEASE_BASE =
-            "https://github.com/nemanjan00/pm3-droid/releases/download/nightly"
+        const val DEFAULT_RELEASE_BASE = "$REPO/releases/latest/download"
+
+        /** Opt-in target for anyone running a nightly build of the app. */
+        const val NIGHTLY_RELEASE_BASE = "$REPO/releases/download/nightly"
 
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val READ_TIMEOUT_MS = 60_000
