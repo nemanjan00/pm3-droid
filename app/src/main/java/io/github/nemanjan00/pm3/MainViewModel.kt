@@ -331,6 +331,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return ActionResult(action, output, lf, hf, antenna, failed)
     }
 
+    fun clearConsole() {
+        _console.value = emptyList()
+    }
+
     fun clearActionResult() {
         _actionResult.value = null
     }

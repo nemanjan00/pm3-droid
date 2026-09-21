@@ -1,6 +1,11 @@
 package io.github.nemanjan00.pm3.ui
 
+import android.os.Build
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -11,12 +16,17 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -127,35 +137,105 @@ private fun BridgeStatusBar(state: BridgeService.State) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ConsoleScreen(viewModel: MainViewModel, state: BridgeService.State) {
     val lines by viewModel.console.collectAsState()
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
 
-    // Follow the tail as output arrives, the way a terminal does.
+    // Following the tail fights a user who has scrolled up to read something,
+    // which is exactly when they are about to copy it. Only auto-scroll while
+    // they are already at the bottom.
+    val atBottom by remember {
+        derivedStateOf {
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+            last == null || last.index >= listState.layoutInfo.totalItemsCount - 2
+        }
+    }
     LaunchedEffect(lines.size) {
-        if (lines.isNotEmpty()) listState.animateScrollToItem(lines.lastIndex)
+        if (lines.isNotEmpty() && atBottom) listState.animateScrollToItem(lines.lastIndex)
+    }
+
+    fun copy(text: String, what: String) {
+        if (text.isEmpty()) return
+
+        // The clipboard crosses a binder transaction, which is capped around
+        // 1 MB for the whole transaction -- and a long session (an autopwn
+        // run, a trace dump) can get there. Keep the tail, which is the part
+        // someone wants, and say so rather than truncating silently.
+        val truncated = text.length > CLIPBOARD_LIMIT
+        val payload = if (truncated) {
+            "[... earlier output omitted, clipboard limit reached ...]\n" +
+                text.takeLast(CLIPBOARD_LIMIT)
+        } else {
+            text
+        }
+
+        clipboard.setText(AnnotatedString(payload))
+
+        // Android 13+ shows its own copy confirmation, so a second one would
+        // double up -- except when there is something extra to say.
+        if (truncated) {
+            Toast.makeText(context, "Copied the last ${CLIPBOARD_LIMIT / 1024} KB", Toast.LENGTH_LONG).show()
+        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            Toast.makeText(context, "Copied $what", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // imePadding: without it the keyboard covers the very input field it was
     // opened for, which on a console is the whole interaction.
     Column(Modifier.fillMaxSize().imePadding()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(horizontal = 8.dp),
+
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            items(lines) { line ->
-                Text(
-                    line,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = lineColour(line),
-                )
+            Text(
+                "${lines.size} lines",
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            TextButton(
+                onClick = { copy(lines.joinToString("\n"), "console output") },
+                enabled = lines.isNotEmpty(),
+            ) {
+                Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("Copy all")
+            }
+            TextButton(onClick = { viewModel.clearConsole() }, enabled = lines.isNotEmpty()) {
+                Text("Clear")
+            }
+        }
+
+        // SelectionContainer gives the ordinary Android drag-to-select gesture
+        // across the log, for pulling out a single UID rather than the lot.
+        SelectionContainer(Modifier.weight(1f)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 8.dp),
+            ) {
+                items(lines) { line ->
+                    Text(
+                        line,
+                        // Long-press copies just this line. Selection handles
+                        // are fiddly on a 12sp monospace log, so the common
+                        // case gets a gesture of its own.
+                        modifier = Modifier.combinedClickable(
+                            onClick = {},
+                            onLongClick = { copy(line, "line") },
+                        ),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        color = lineColour(line),
+                    )
+                }
             }
         }
 
@@ -183,6 +263,9 @@ fun ConsoleScreen(viewModel: MainViewModel, state: BridgeService.State) {
         }
     }
 }
+
+/** Well under the ~1 MB binder transaction limit, with room for overhead. */
+private const val CLIPBOARD_LIMIT = 256 * 1024
 
 /** Colours the client's own [+]/[!]/[=] severity markers. */
 @Composable
