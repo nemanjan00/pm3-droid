@@ -188,7 +188,16 @@ class Pm3Session(
 
     companion object {
         private const val RPC_SCRIPT = "pm3_rpc"
-        private const val PROMPT = "[usb] pm3 -->"
+        /**
+         * Neutral on purpose.
+         *
+         * This is the app's own echo of what it sent, not the client's
+         * prompt. It used to read "[usb] pm3 -->", which is a claim about the
+         * transport and the hardware -- and a wrong one on, say, a PM5 over
+         * BLE, where the client's real prompt is "[fpc|tcp|script] pm5 -->".
+         * Better to say nothing about the link than to say something false.
+         */
+        private const val PROMPT = "pm3 -->"
 
         private val CONTROL_TYPES = setOf("started", "command_end", "error")
 

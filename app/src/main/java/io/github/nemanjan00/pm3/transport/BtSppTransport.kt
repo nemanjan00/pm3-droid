@@ -67,11 +67,25 @@ class BtSppTransport(
     override fun read(buffer: ByteArray, timeoutMs: Int): Int {
         val stream = input ?: throw TransportException("Not connected")
         return try {
-            // BluetoothSocket streams have no read timeout, but available()
-            // lets us stay non-blocking; the bridge's pump loop supplies the
-            // pacing. A blocking read here would wedge the pump on a quiet link.
-            if (stream.available() == 0) return 0
-            stream.read(buffer)
+            // BluetoothSocket's InputStream has no read timeout, and a
+            // blocking read would wedge the pump on a quiet link. But simply
+            // returning 0 when available() is empty made the bridge's rx
+            // thread spin flat out -- a full core burned on an idle link,
+            // which on a phone costs battery and starves the very threads
+            // carrying the traffic.
+            //
+            // So poll, but sleep between looks, up to the caller's timeout.
+            val deadline = System.nanoTime() + timeoutMs * 1_000_000L
+            while (true) {
+                if (stream.available() > 0) return stream.read(buffer)
+                if (System.nanoTime() >= deadline) return 0
+                Thread.sleep(POLL_INTERVAL_MS)
+            }
+            @Suppress("UNREACHABLE_CODE")
+            0
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            0
         } catch (e: Exception) {
             throw TransportException("BT read failed", e)
         }
@@ -97,6 +111,12 @@ class BtSppTransport(
     }
 
     companion object {
+        /**
+         * Short enough that a reply is not delayed perceptibly, long enough
+         * that an idle link costs almost nothing.
+         */
+        private const val POLL_INTERVAL_MS = 4L
+
         /** Standard Serial Port Profile UUID. */
         private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
