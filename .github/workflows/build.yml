@@ -119,6 +119,13 @@ jobs:
           done
           ls -lh app/src/main/jniLibs/*/ app/src/main/assets/
 
+      - name: Unit tests
+        # TagParser scrapes the client's printed output. Upstream rewords
+        # those strings between releases, and a parser that quietly stops
+        # matching yields blank fields rather than an error -- so this is the
+        # one part of the app worth failing the build over.
+        run: ./gradlew :app:testDebugUnitTest
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug
 

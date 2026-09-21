@@ -5,6 +5,8 @@ import android.bluetooth.BluetoothDevice
 import android.hardware.usb.UsbDevice
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.nemanjan00.pm3.actions.Pm3Action
+import io.github.nemanjan00.pm3.actions.TagParser
 import io.github.nemanjan00.pm3.bridge.BridgeService
 import io.github.nemanjan00.pm3.bridge.TcpBridge
 import io.github.nemanjan00.pm3.client.Pm3Runtime
@@ -21,6 +23,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -50,6 +54,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _firmwareSync = MutableStateFlow<FirmwareRepository.Progress?>(null)
     val firmwareSync: StateFlow<FirmwareRepository.Progress?> = _firmwareSync
 
+    /** Result of the last action, shown as parsed fields plus raw output. */
+    data class ActionResult(
+        val action: Pm3Action,
+        val raw: String,
+        val lf: TagParser.LfTag? = null,
+        val hf: TagParser.HfTag? = null,
+        val antenna: TagParser.Antenna? = null,
+        val failed: Boolean = false,
+    )
+
+    private val _runningAction = MutableStateFlow<Pm3Action?>(null)
+    val runningAction: StateFlow<Pm3Action?> = _runningAction
+
+    private val _actionResult = MutableStateFlow<ActionResult?>(null)
+    val actionResult: StateFlow<ActionResult?> = _actionResult
+
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning
 
@@ -68,6 +88,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private var service: BridgeService? = null
     private var session: Pm3Session? = null
+    private val sessionLock = Mutex()
 
     fun attachService(s: BridgeService?) { service = s }
 
@@ -127,6 +148,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Called by the UI once the service leaves its Connecting state. */
     fun clearConnectingKey() {
         _connectingKey.value = null
+    }
+
+    /**
+     * Returns a live session, starting one if needed.
+     *
+     * Serialised by [sessionLock] so two actions fired in quick succession
+     * cannot each spawn a client -- two clients on one bridge would interleave
+     * frames on a link that allows exactly one peer.
+     */
+    private suspend fun ensureSession(port: Int): Pm3Session? = sessionLock.withLock {
+        session?.takeIf { it.isAlive }?.let { return@withLock it }
+
+        runCatching { withContext(Dispatchers.IO) { runtime.install() } }
+            .onFailure { append("[!] Could not unpack resources: ${it.message}"); return null }
+
+        val s = Pm3Session(runtime, viewModelScope)
+        viewModelScope.launch { s.output.collect { append(it) } }
+        runCatching { s.start("tcp:127.0.0.1:$port") }
+            .onFailure {
+                append("[!] Client failed to start: ${it.message}")
+                return null
+            }
+        session = s
+        s
     }
 
     /** Starts the in-app client against the running bridge. */
@@ -239,6 +284,55 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (progress is Flasher.Progress.Finished) append("[=] ${progress.message}")
                 }
         }
+    }
+
+    /**
+     * Runs [action] and parses its output.
+     *
+     * Starts the client session if it is not already up, so the Actions tab
+     * works without a detour through the Console tab first.
+     */
+    fun run(action: Pm3Action) {
+        if (_runningAction.value != null) return // one command at a time
+
+        val state = service?.state?.value
+        if (state !is BridgeService.State.Running) {
+            append("[!] Connect a device first")
+            return
+        }
+
+        _runningAction.value = action
+        viewModelScope.launch {
+            try {
+                val s = ensureSession(state.port)
+                if (s == null) {
+                    _actionResult.value = ActionResult(
+                        action, "Could not start the Proxmark client.", failed = true,
+                    )
+                    return@launch
+                }
+                val result = s.execute(action.command)
+                _actionResult.value = parse(action, result.output, !result.ok)
+            } catch (e: Exception) {
+                _actionResult.value =
+                    ActionResult(action, e.message ?: "Command failed", failed = true)
+            } finally {
+                _runningAction.value = null
+            }
+        }
+    }
+
+    private fun parse(action: Pm3Action, output: String, failed: Boolean): ActionResult {
+        // Parse by what the command actually returns, not by group: `auto`
+        // and `hf search` both emit 14a fields, and `auto` emits LF ones too.
+        val lf = TagParser.lfSearch(output).takeIf { !it.isEmpty }
+        val hf = TagParser.hf14aInfo(output).takeIf { !it.isEmpty }
+        val antenna = if (action.id == "hw_tune") TagParser.hwTune(output) else null
+        return ActionResult(action, output, lf, hf, antenna, failed)
+    }
+
+    fun clearActionResult() {
+        _actionResult.value = null
     }
 
     private fun append(line: String) {

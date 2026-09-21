@@ -91,6 +91,15 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+
+    testOptions {
+        unitTests {
+            // TagParser scrapes the client's printed output; the samples in
+            // the tests are real client text, so these run on the JVM with no
+            // device and no Android framework stubs needed.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -108,4 +117,6 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.usbserial)
+
+    testImplementation(libs.junit)
 }

@@ -27,6 +27,7 @@ import io.github.nemanjan00.pm3.bridge.BridgeService
 
 private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Device("Device", Icons.Filled.Usb),
+    Actions("Actions", Icons.Filled.Sensors),
     Flash("Flash", Icons.Filled.Memory),
     Console("Console", Icons.Filled.Terminal),
 }
@@ -62,6 +63,7 @@ fun Pm3App(viewModel: MainViewModel, serviceBound: Boolean) {
                     LoadingPane()
                 } else when (tab) {
                     Tab.Device -> DeviceScreen(viewModel, bridgeState)
+                    Tab.Actions -> ActionsScreen(viewModel, bridgeState)
                     Tab.Flash -> FlashScreen(viewModel, bridgeState)
                     Tab.Console -> ConsoleScreen(viewModel, bridgeState)
                 }

@@ -97,8 +97,11 @@ class Pm3Runtime(private val context: Context) {
     /** Environment for a client process: HOME plus a sane terminal. */
     fun environment(): Map<String, String> = mapOf(
         "HOME" to home.absolutePath,
-        // The client checks TERM to decide on ANSI colour. "dumb" would strip
-        // it, and the console renders colour, so claim a capable terminal.
+        // The client enables ANSI colour only when stdin *and* stdout are
+        // both TTYs (proxmark3.c), and we always spawn it on pipes -- so its
+        // output is plain ASCII regardless of this, which is what lets
+        // TagParser scrape it. TERM is set only to keep the client off its
+        // "dumb terminal" fallbacks.
         "TERM" to "xterm-256color",
         // Used for progress-bar width; the console re-sends this on resize.
         "COLUMNS" to "80",
