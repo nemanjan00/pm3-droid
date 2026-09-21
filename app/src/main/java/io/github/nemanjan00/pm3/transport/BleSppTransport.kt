@@ -13,6 +13,8 @@ import java.io.ByteArrayOutputStream
 import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Semaphore
+import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.TimeUnit
 
 /**
@@ -53,6 +55,21 @@ class BleSppTransport(
     private var negotiatedMtu = DEFAULT_MTU
     @Volatile private var connected = false
 
+    /**
+     * Completion of the one write the GATT stack will carry at a time.
+     *
+     * Android permits a single outstanding characteristic write; issuing the
+     * next before onCharacteristicWrite arrives gets it rejected. Since a
+     * Proxmark frame is up to 2048 bytes and the MTU caps a chunk near 514,
+     * an ordinary command is several chunks -- so firing them back to back
+     * delivered a truncated frame and the client reported "Communicating with
+     * Proxmark3 device failed".
+     */
+    private val writeComplete = SynchronousQueue<Int>()
+
+    /** Serialises writers, so two threads cannot interleave their chunks. */
+    private val writeLock = Semaphore(1)
+
     private val connectedLatch = CountDownLatch(1)
     private val servicesLatch = CountDownLatch(1)
     private val mtuLatch = CountDownLatch(1)
@@ -88,6 +105,16 @@ class BleSppTransport(
                 spp = g.getService(SPP_SERVICE_UUID)?.getCharacteristic(SPP_CHAR_UUID)
             }
             servicesLatch.countDown()
+        }
+
+        override fun onCharacteristicWrite(
+            g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int,
+        ) {
+            if (characteristic.uuid != SPP_CHAR_UUID) return
+            // offer, not put: if the writer already timed out and walked away
+            // there is no one to hand this to, and blocking the binder thread
+            // would wedge the GATT stack.
+            writeComplete.offer(status)
         }
 
         override fun onDescriptorWrite(
@@ -180,18 +207,44 @@ class BleSppTransport(
         return n
     }
 
-    @Suppress("DEPRECATION")
     override fun write(data: ByteArray) {
         val g = gatt ?: throw TransportException("Not connected")
         val characteristic = spp ?: throw TransportException("Not connected")
 
         // 3 bytes of ATT header come off the MTU for a write payload.
         val chunk = negotiatedMtu - ATT_HEADER_BYTES
-        var offset = 0
-        while (offset < data.size) {
-            val end = minOf(offset + chunk, data.size)
-            val slice = data.copyOfRange(offset, end)
-            val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+
+        writeLock.acquire()
+        try {
+            var offset = 0
+            while (offset < data.size) {
+                val end = minOf(offset + chunk, data.size)
+                writeChunk(g, characteristic, data.copyOfRange(offset, end))
+                offset = end
+            }
+        } finally {
+            writeLock.release()
+        }
+    }
+
+    /**
+     * Issues one chunk and waits for the stack to take it.
+     *
+     * A partial frame is worse than a failed one: the device would act on
+     * whatever arrived. So a chunk that cannot be delivered throws, and the
+     * bridge tears the link down rather than leaving the device mid-frame.
+     */
+    @Suppress("DEPRECATION")
+    private fun writeChunk(
+        g: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        slice: ByteArray,
+    ) {
+        var attempt = 0
+        while (true) {
+            writeComplete.poll() // discard any late completion from before
+
+            val accepted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 g.writeCharacteristic(
                     characteristic, slice,
                     BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE,
@@ -201,8 +254,27 @@ class BleSppTransport(
                 characteristic.value = slice
                 g.writeCharacteristic(characteristic)
             }
-            if (!ok) throw TransportException("BLE write rejected")
-            offset = end
+
+            if (accepted) {
+                val status = try {
+                    writeComplete.poll(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw TransportException("Interrupted mid-write")
+                } ?: throw TransportException("Timed out waiting for the BLE write to complete")
+
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    throw TransportException("BLE write failed (status $status)")
+                }
+                return
+            }
+
+            // Rejected outright: the stack's buffer is full. Back off briefly
+            // rather than dropping the chunk, which would truncate the frame.
+            if (++attempt > WRITE_ATTEMPTS) {
+                throw TransportException("BLE write rejected after $WRITE_ATTEMPTS attempts")
+            }
+            Thread.sleep(WRITE_RETRY_MS)
         }
     }
 
@@ -238,6 +310,9 @@ class BleSppTransport(
         private const val PREFERRED_MTU = 517
         private const val ATT_HEADER_BYTES = 3
         private const val INBOUND_QUEUE_DEPTH = 512
+        private const val WRITE_TIMEOUT_MS = 5_000L
+        private const val WRITE_ATTEMPTS = 20
+        private const val WRITE_RETRY_MS = 5L
         private const val CONNECT_TIMEOUT_MS = 15_000L
         private const val GATT_TIMEOUT_MS = 10_000L
     }

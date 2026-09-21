@@ -18,8 +18,13 @@
 --
 local json = require('dkjson')
 
+-- The leading newline matters. The client prints progress with
+-- PrintAndLogEx(INPLACE, ...), which emits a carriage return and no trailing
+-- newline, so whatever it left on the line would otherwise swallow this
+-- object: "[=] Searching...{"type":"command_end"}". The host then never sees
+-- the sentinel and waits forever for a command that already finished.
 local function emit(obj)
-    io.write(json.encode(obj) .. "\n")
+    io.write("\n" .. json.encode(obj) .. "\n")
     io.flush()
 end
 

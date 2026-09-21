@@ -103,15 +103,24 @@ class Pm3Session(
 
     private suspend fun pump(reader: BufferedReader) {
         reader.useLines { lines ->
-            for (line in lines) {
-                val control = parseControl(line)
-                if (control == null) {
-                    _output.emit(line)
+            for (rawLine in lines) {
+                val split = splitControl(rawLine)
+                if (split == null) {
+                    _output.emit(rawLine)
                     // Only accumulate while a command is in flight; unsolicited
                     // output (device notifications) is display-only.
-                    if (pending != null) collected.appendLine(line)
+                    if (pending != null) collected.appendLine(rawLine)
                     continue
                 }
+
+                val (prefix, control) = split
+                // Text the client left on the line before the sentinel is
+                // still real output; it must not vanish with the framing.
+                if (prefix.isNotBlank()) {
+                    _output.emit(prefix)
+                    if (pending != null) collected.appendLine(prefix)
+                }
+
                 when (control.optString("type")) {
                     "started" -> started.complete(Unit)
                     "command_end" -> {
@@ -137,12 +146,6 @@ class Pm3Session(
      * load`), so a line only counts as control if it parses *and* carries one
      * of the shim's own type tags.
      */
-    private fun parseControl(line: String): JSONObject? {
-        if (!line.startsWith("{")) return null
-        val obj = runCatching { JSONObject(line) }.getOrNull() ?: return null
-        return if (obj.optString("type") in CONTROL_TYPES) obj else null
-    }
-
     /** Runs [command] and returns everything it printed. */
     suspend fun execute(command: String, timeoutMs: Long = COMMAND_TIMEOUT_MS): CommandResult =
         commandLock.withLock {
@@ -172,21 +175,62 @@ class Pm3Session(
             }
         }
 
+    /**
+     * Shuts the client down.
+     *
+     * Detaches its state synchronously, then does the blocking part off the
+     * caller's thread. Writing to the pipe and waiting on the process took up
+     * to [EXIT_GRACE_MS] -- run from a UI click that is a two-second freeze of
+     * the main thread, which Android answers by killing the app.
+     */
     fun stop() {
-        runCatching {
-            stdin?.write(JSONObject().put("type", "exit").toString() + "\n")
-            stdin?.flush()
-        }
-        runCatching { stdin?.close() }
-        // Give the client a moment to unwind its device session cleanly; it
-        // resets the Proxmark on the way out.
-        runCatching { process?.waitFor(EXIT_GRACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS) }
-        runCatching { process?.destroy() }
+        val doomedProcess = process
+        val doomedStdin = stdin
         process = null
         stdin = null
+        if (doomedProcess == null && doomedStdin == null) return
+
+        scope.launch(Dispatchers.IO) {
+            // Ask the shim to leave its loop, so the client resets the
+            // Proxmark and closes the device session cleanly.
+            runCatching {
+                doomedStdin?.write(JSONObject().put("type", "exit").toString() + "\n")
+                doomedStdin?.flush()
+            }
+            runCatching { doomedStdin?.close() }
+            runCatching {
+                doomedProcess?.waitFor(EXIT_GRACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
+            runCatching { doomedProcess?.destroy() }
+        }
     }
 
     companion object {
+
+        /**
+         * Splits a line into (leading output, control object), or null if it
+         * carries no control object.
+         *
+         * The shim prefixes each object with a newline, but belt and braces: the
+         * client also prints progress in place, with a carriage return and no
+         * trailing newline, so a sentinel can still end up appended to leftover
+         * text. Matching only at position 0 loses it entirely, and losing a
+         * command_end hangs the caller forever -- so find it wherever it sits and
+         * hand back the prefix to be shown as ordinary output.
+         */
+        internal fun splitControl(line: String): Pair<String, JSONObject>? {
+            var from = line.indexOf('{')
+            while (from >= 0) {
+                val candidate = line.substring(from)
+                val obj = runCatching { JSONObject(candidate) }.getOrNull()
+                if (obj != null && obj.optString("type") in CONTROL_TYPES) {
+                    return line.substring(0, from) to obj
+                }
+                from = line.indexOf('{', from + 1)
+            }
+            return null
+        }
+
         private const val RPC_SCRIPT = "pm3_rpc"
         /**
          * Neutral on purpose.

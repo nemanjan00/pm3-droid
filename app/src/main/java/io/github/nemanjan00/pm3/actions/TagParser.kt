@@ -33,6 +33,28 @@ object TagParser {
         val isEmpty: Boolean get() = uid == null && atqa == null && sak == null
     }
 
+    /**
+     * `lf t55xx detect` / `info`.
+     *
+     * The client prints these as a dotted-leader block, e.g.
+     * "[=]  Chip type......... T55x7". Kept as an ordered map rather than
+     * named fields: the set of rows varies with the chip and the downlink
+     * mode, and an unknown row is worth showing verbatim rather than dropping.
+     */
+    data class T55xx(val fields: Map<String, String>) {
+        val isEmpty: Boolean get() = fields.isEmpty()
+
+        val chipType: String? get() = fields["Chip type"]
+        val modulation: String? get() = fields["Modulation"]
+        val block0: String? get() = fields["Block0"]
+
+        /**
+         * A password-protected T55xx will not take a write without the
+         * password, and writing blind can lock the card out permanently.
+         */
+        val passwordSet: Boolean get() = fields["Password set"]?.startsWith("Yes") == true
+    }
+
     data class Antenna(
         val lfVoltage: String?,
         val lfOptimalDivisor: String?,
@@ -93,11 +115,54 @@ object TagParser {
         hfVerdict = Regex("""HF antenna\s*\(\s*(.+?)\s*\)""").find(output)?.groupValues?.get(1),
     )
 
+    /**
+     * Parses the key/value block the T55xx commands print.
+     *
+     * Two shapes exist and both turn up in normal use:
+     *
+     *   `lf t55xx detect`  "[=]  Chip type......... T55x7"
+     *   `lf t55xx info`    "[=]  Safer key                 : 0"
+     *
+     * The dotted form also carries the fingerprint line, "[+] Config block
+     * match... EM unique, Paxton", which is the most useful row of the lot.
+     *
+     * Rule/header lines ("--- Fingerprint ------------", a run of dashes) and
+     * valueless rows are skipped rather than stored as junk fields.
+     */
+    fun t55xx(output: String): T55xx {
+        val fields = LinkedHashMap<String, String>()
+
+        for (raw in output.lineSequence()) {
+            // Strip the client's severity marker.
+            val line = MARKER.replace(raw, "").trim()
+            if (line.isEmpty()) continue
+            // Section rules and headers, e.g. "--- Fingerprint ------------".
+            if (line.startsWith("-")) continue
+
+            val match = DOTTED.find(line) ?: COLON.find(line) ?: continue
+            val label = match.groupValues[1].trim().trimEnd('.', ':').trim()
+            val value = match.groupValues[2].trim()
+            if (label.isEmpty() || value.isEmpty()) continue
+            if (label.startsWith("-")) continue
+            fields[label] = value
+        }
+        return T55xx(fields)
+    }
+
     /** True when the client reported no tag rather than an error. */
     fun foundNothing(output: String): Boolean =
         output.contains("No known 125/134 kHz tags found") ||
             output.contains("No data found") ||
             output.contains("Unknown") && !output.contains("Valid")
+
+    /** The client's "[=] " / "[+] " severity marker. */
+    private val MARKER = Regex("""^\s*\[[=+!\-]{1,2}\]\s*""")
+
+    /** "Chip type......... T55x7" */
+    private val DOTTED = Regex("""^(\S.*?)\.{3,}\s*(.*)${'$'}""")
+
+    /** "Safer key                 : 0" */
+    private val COLON = Regex("""^(\S[^:]*?)\s*:\s+(.*)${'$'}""")
 
     private val ID_PATTERNS = listOf(
         Regex("""EM 410x ID\s+([0-9A-Fa-f]+)"""),

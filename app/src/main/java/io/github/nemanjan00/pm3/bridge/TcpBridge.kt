@@ -66,16 +66,30 @@ class TcpBridge(
         onEvent(Event.Listening(boundPort))
 
         acceptThread = thread(name = "pm3-bridge-accept") {
-            while (running.get()) {
-                val client = try {
-                    s.accept()
-                } catch (e: IOException) {
-                    if (running.get()) onEvent(Event.Error("accept() failed", e))
-                    break
+            // A bare thread's uncaught exception reaches Android's default
+            // handler, which kills the process. Nothing that goes wrong on a
+            // bridge thread justifies taking the app down, so everything is
+            // funnelled into an event instead.
+            try {
+                while (running.get()) {
+                    val client = try {
+                        s.accept()
+                    } catch (e: IOException) {
+                        if (running.get()) onEvent(Event.Error("accept() failed", e))
+                        break
+                    }
+                    try {
+                        serve(client)
+                    } catch (e: Throwable) {
+                        onEvent(Event.Error("Bridge session failed", e))
+                        runCatching { client.close() }
+                    }
                 }
-                serve(client)
+            } catch (e: Throwable) {
+                onEvent(Event.Error("Bridge accept loop failed", e))
+            } finally {
+                onEvent(Event.Stopped)
             }
-            onEvent(Event.Stopped)
         }
     }
 
@@ -104,7 +118,9 @@ class TcpBridge(
                         break
                     }
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable, not Exception: an Error here would otherwise
+                // escape the thread and kill the process.
                 if (running.get() && clientAlive.get()) {
                     onEvent(Event.Error("Device read failed", e))
                 }

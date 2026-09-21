@@ -119,4 +119,8 @@ dependencies {
     implementation(libs.usbserial)
 
     testImplementation(libs.junit)
+    // The android.jar stub's org.json does nothing under
+    // isReturnDefaultValues, so JSONObject silently parses to empty. The real
+    // implementation makes the framing tests exercise real parsing.
+    testImplementation(libs.json)
 }

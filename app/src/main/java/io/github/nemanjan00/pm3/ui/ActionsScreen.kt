@@ -160,6 +160,29 @@ private fun ResultCard(result: MainViewModel.ActionResult, onDismiss: () -> Unit
                 Field("SAK", tag.sak, mono = true)
                 Field("Type", tag.type)
             }
+            result.t55xx?.let { t ->
+                if (t.passwordSet) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Text(
+                            "This card has a password set. Writing to it " +
+                                "without the password will fail, and on some " +
+                                "T55xx a blind write can lock the card for good.",
+                            Modifier.padding(8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                // Rendered in the order the client printed them: the layout
+                // groups related settings and is easier to follow than any
+                // re-ordering of ours.
+                t.fields.forEach { (label, value) ->
+                    Field(label, value, mono = label == "Block0" || label.contains("Raw"))
+                }
+            }
+
             result.antenna?.let { a ->
                 Field("LF voltage", a.lfVoltage)
                 Field("LF optimal divisor", a.lfOptimalDivisor)
