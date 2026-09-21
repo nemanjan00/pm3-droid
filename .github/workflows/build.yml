@@ -312,24 +312,33 @@ jobs:
           generate_release_notes: true
 
   # ---------------------------------------------------------------------
-  # Nightly: republish a rolling `nightly` prerelease from the default branch.
+  # Nightly: republish the rolling `nightly` prerelease.
   #
-  # Skipped on an ordinary push -- that is expected. A push builds and uploads
-  # APKs as job artifacts; only the schedule, a manual run, or a v* tag
-  # publishes a release.
+  # Runs on every push to the default branch, plus the daily schedule and
+  # manual runs. Pull requests never publish -- a fork's token cannot write
+  # here anyway, and a PR has no business moving the tag.
   # ---------------------------------------------------------------------
   nightly:
     runs-on: ubuntu-latest
     needs: [apk, firmware]
     # Compared against the repository's actual default branch rather than a
     # hardcoded "master": the push trigger accepts master or main, so pinning
-    # one here means a branch rename silently stops manual nightlies.
+    # one here means a branch rename silently stops nightlies.
+    #
+    # A v* tag push does not match -- github.ref is refs/tags/* there, and
+    # that is the `release` job's business.
     if: >-
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' &&
+      ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
        github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     permissions:
       contents: write
+    # Two pushes in quick succession would otherwise race on the same tag and
+    # release. Queued rather than cancelled: cancelling mid-publish can leave
+    # the release half-uploaded.
+    concurrency:
+      group: nightly-release
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -360,13 +369,12 @@ jobs:
           ls -lh release
 
       - name: Move the nightly tag
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          # A rolling tag, repointed at whatever master is tonight. Deleting
-          # the release first keeps its asset list from accumulating stale
-          # APKs across runs -- uploads are additive otherwise.
-          gh release delete nightly --yes --cleanup-tag || true
+          # Repoint the rolling tag at this commit. The release itself is
+          # updated in place by the next step rather than deleted and
+          # recreated: deleting leaves a window with no nightly at all, and
+          # on every-commit publishing that window is hit often. Asset names
+          # are stable, so re-uploading overwrites rather than accumulates.
           git tag -f nightly
           git push -f origin nightly
 
@@ -375,10 +383,18 @@ jobs:
           tag_name: nightly
           name: "Nightly (${{ github.sha }})"
           body: |
-            Rolling build from `master`, rebuilt nightly against
-            `${{ env.PM3_REPO }}@${{ env.PM3_REF }}`.
+            Rolling build of the default branch, republished on every commit
+            and rebuilt daily against `${{ env.PM3_REPO }}@${{ env.PM3_REF }}`.
 
-            Untested against hardware by CI -- treat firmware here as
-            unverified, and prefer a tagged release if you have one.
+            Commit `${{ github.sha }}`.
+
+            APKs are signed with the project release key. Pick the APK
+            matching your device's ABI, or `universal` if unsure.
+
+            Untested against hardware by CI -- treat the firmware here as
+            unverified, and prefer a tagged release if one exists.
           prerelease: true
+          # Never let a nightly displace a tagged release as "Latest"; the
+          # app's firmware download resolves /releases/latest/download.
+          make_latest: false
           files: release/*

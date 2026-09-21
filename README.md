@@ -31,13 +31,19 @@ on the same Wi-Fi.
 
 | Trigger | Jobs that run | Output |
 |---|---|---|
-| push / PR | `client`, `apk`, `firmware` | APKs and firmware as job artifacts |
-| manual run on the default branch | + `nightly` | rolling `nightly` prerelease |
+| push to the default branch | `client`, `apk`, `firmware`, `nightly` | rolling `nightly` prerelease, republished |
+| push to any other branch, or a PR | `client`, `apk`, `firmware` | APKs and firmware as job artifacts |
 | 04:15 UTC daily | + `nightly` | rolling `nightly` prerelease |
 | push a `v*` tag | + `release` | a published release |
 
-`release` and `nightly` showing as *skipped* on an ordinary push is expected —
-they are gated, not broken.
+Every commit on the default branch republishes `nightly`, so the newest signed
+APKs are always one click away without tagging anything. It is marked a
+prerelease and never becomes "Latest", so it cannot displace a tagged release
+— which matters because the in-app firmware download resolves
+`/releases/latest/download`.
+
+`release` showing as *skipped* on an ordinary push is expected — it is gated
+on a tag, not broken.
 
 Published releases carry only the **signed release** APKs; the debug builds
 stay as job artifacts, since publishing debug-key APKs beside the real ones
