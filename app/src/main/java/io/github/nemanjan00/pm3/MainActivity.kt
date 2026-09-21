@@ -14,6 +14,8 @@ import android.os.Bundle
 import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
@@ -72,6 +74,17 @@ class MainActivity : ComponentActivity() {
     ) { viewModel.refreshDevices() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // targetSdk 35 draws edge to edge on Android 15 regardless; opting in
+        // explicitly makes the behaviour the same on older releases, so the
+        // inset padding in the UI is not version-dependent.
+        //
+        // Forced dark, because the UI is unconditionally darkColorScheme.
+        // The default (auto) follows the *system* theme, which on a
+        // light-themed phone would paint dark status icons onto our dark bar.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
 
         BridgeService.start(this)

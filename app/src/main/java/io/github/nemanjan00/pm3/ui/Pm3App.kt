@@ -2,6 +2,8 @@ package io.github.nemanjan00.pm3.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -85,6 +87,12 @@ private fun BridgeStatusBar(state: BridgeService.State) {
     val (title, subtitle, colour) = when (state) {
         BridgeService.State.Idle ->
             Triple("Not connected", "Pick a device below", MaterialTheme.colorScheme.surfaceVariant)
+        is BridgeService.State.Connecting ->
+            Triple(
+                "Connecting…",
+                state.deviceName,
+                MaterialTheme.colorScheme.secondaryContainer,
+            )
         is BridgeService.State.Running ->
             Triple(
                 state.deviceName,
@@ -97,7 +105,15 @@ private fun BridgeStatusBar(state: BridgeService.State) {
     }
 
     Surface(color = colour) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        // The surface stays full-bleed so its colour continues behind the
+        // status bar; only the text is inset. Padding the Surface itself
+        // would leave a bare strip of window background up there.
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(16.dp)
+        ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(
                 subtitle,
@@ -120,7 +136,9 @@ fun ConsoleScreen(viewModel: MainViewModel, state: BridgeService.State) {
         if (lines.isNotEmpty()) listState.animateScrollToItem(lines.lastIndex)
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // imePadding: without it the keyboard covers the very input field it was
+    // opened for, which on a console is the whole interaction.
+    Column(Modifier.fillMaxSize().imePadding()) {
         LazyColumn(
             state = listState,
             modifier = Modifier

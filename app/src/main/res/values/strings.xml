@@ -4,6 +4,7 @@
     <string name="channel_bridge">Device bridge</string>
     <string name="bridge_idle">No device connected</string>
     <string name="bridge_running">%1$s · tcp:127.0.0.1:%2$d</string>
+    <string name="bridge_connecting">Connecting to %1$s…</string>
 
     <string name="tab_device">Device</string>
     <string name="tab_flash">Flash</string>

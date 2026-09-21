@@ -1,6 +1,7 @@
 package io.github.nemanjan00.pm3.ui
 
 import android.content.Context
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -24,12 +25,44 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
     val context = LocalContext.current
     val devices by viewModel.devices.collectAsState()
     val scanning by viewModel.scanning.collectAsState()
+
+    // One link at a time. While a connect is in flight, or one is already up,
+    // every Connect button is inert -- a second tap would tear down the link
+    // the first just made.
+    val busy = state is BridgeService.State.Connecting || state is BridgeService.State.Running
+    val connecting = state as? BridgeService.State.Connecting
+    val connectingKey by viewModel.connectingKey.collectAsState()
+
+    // The optimistic key is cleared once the service settles, so a failed
+    // connect returns every row to its normal state.
+    LaunchedEffect(state) {
+        if (state !is BridgeService.State.Connecting) viewModel.clearConnectingKey()
+    }
     val termux = remember { TermuxIntegration(context) }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        if (connecting != null) {
+            Card(colors = CardDefaults.cardColors(MaterialTheme.colorScheme.secondaryContainer)) {
+                Row(
+                    Modifier.padding(16.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Connecting to ${connecting.deviceName}…",
+                            style = MaterialTheme.typography.titleSmall)
+                        Text("BLE can take a few seconds to negotiate.",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(onClick = { viewModel.disconnect() }) { Text("Cancel") }
+                }
+            }
+        }
+
         if (state is BridgeService.State.Running) {
             ConnectedCard(viewModel, state, termux)
         }
@@ -47,6 +80,8 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
                     icon = Icons.Filled.Usb,
                     title = device.productName ?: "Proxmark",
                     subtitle = "%04x:%04x".format(device.vendorId, device.productId),
+                    enabled = !busy,
+                    connecting = connectingKey == MainViewModel.usbKey(device),
                     onClick = {
                         if (hasUsbPermission(context, device)) {
                             viewModel.connectUsb(device)
@@ -72,10 +107,12 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
             devices.bonded.forEach { device ->
                 DeviceRow(
                     icon = Icons.Filled.Bluetooth,
+                    enabled = !busy,
                     title = device.name ?: device.address,
                     subtitle = if (BtSppTransport.looksLikeProxmark(device))
                         "${device.address} · looks like a Proxmark"
                     else device.address,
+                    connecting = connectingKey == device.address,
                     onClick = { viewModel.connectBtClassic(device) },
                 )
             }
@@ -94,6 +131,8 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
                     icon = Icons.AutoMirrored.Filled.BluetoothSearching,
                     title = device.name ?: device.address,
                     subtitle = device.address,
+                    enabled = !busy,
+                    connecting = connectingKey == device.address,
                     onClick = { viewModel.connectBle(device) },
                 )
             }
@@ -109,6 +148,7 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
             } else {
                 OutlinedButton(
                     onClick = { viewModel.scanBle() },
+                    enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.BluetoothSearching, contentDescription = null)
@@ -192,14 +232,35 @@ private fun DeviceRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
+    enabled: Boolean,
+    connecting: Boolean = false,
     onClick: () -> Unit,
 ) {
     ListItem(
+        // The whole row is the target, not just the button. A Proxmark is
+        // often driven one-handed in the field, and a small trailing button is
+        // easy to miss -- a missed tap reads as "the app ignored me".
+        modifier = Modifier.clickable(
+            enabled = enabled,
+            onClick = onClick,
+            role = androidx.compose.ui.semantics.Role.Button,
+        ),
         leadingContent = { Icon(icon, contentDescription = null) },
         headlineContent = { Text(title) },
         supportingContent = { Text(subtitle) },
         trailingContent = {
-            TextButton(onClick = onClick) { Text("Connect") }
+            when {
+                // Feedback on the row actually tapped, shown the moment it is
+                // tapped rather than when the transport finally answers.
+                connecting -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Connecting…", style = MaterialTheme.typography.labelMedium)
+                }
+                // Disabled, not merely inert: a button that visibly does
+                // nothing invites the second tap this is here to prevent.
+                else -> TextButton(onClick = onClick, enabled = enabled) { Text("Connect") }
+            }
         },
     )
 }

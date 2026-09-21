@@ -53,6 +53,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning
 
+    /**
+     * Stable key of the device being connected, set the instant the row is
+     * tapped.
+     *
+     * The service's Connecting state arrives a beat later and only carries a
+     * display name; this is what lets the tapped row show feedback right away
+     * rather than looking like the tap was missed.
+     */
+    private val _connectingKey = MutableStateFlow<String?>(null)
+    val connectingKey: StateFlow<String?> = _connectingKey
+
     private val bleScanner = BleScanner(app)
 
     private var service: BridgeService? = null
@@ -93,20 +104,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun connectUsb(device: UsbDevice) {
+        _connectingKey.value = usbKey(device)
         service?.connect(UsbTransport(getApplication(), device))
     }
 
     fun connectBtClassic(device: BluetoothDevice) {
+        _connectingKey.value = device.address
         service?.connect(BtSppTransport(getApplication(), device))
     }
 
     fun connectBle(device: BluetoothDevice) {
+        _connectingKey.value = device.address
         service?.connect(BleSppTransport(getApplication(), device))
     }
 
     fun disconnect() {
+        _connectingKey.value = null
         stopSession()
         service?.disconnect()
+    }
+
+    /** Called by the UI once the service leaves its Connecting state. */
+    fun clearConnectingKey() {
+        _connectingKey.value = null
     }
 
     /** Starts the in-app client against the running bridge. */
@@ -232,6 +252,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        /** UsbDevice has no stable id across refreshes; its path does. */
+        fun usbKey(device: UsbDevice): String = device.deviceName
+
         private const val CONSOLE_LINES = 2000
         const val DEFAULT_PORT = TcpBridge.DEFAULT_PORT
     }

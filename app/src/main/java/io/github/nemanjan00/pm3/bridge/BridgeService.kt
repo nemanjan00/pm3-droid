@@ -14,8 +14,16 @@ import android.os.IBinder
 import io.github.nemanjan00.pm3.MainActivity
 import io.github.nemanjan00.pm3.R
 import io.github.nemanjan00.pm3.transport.Transport
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Keeps the transport and its TCP bridge alive while the app is backgrounded.
@@ -30,6 +38,8 @@ class BridgeService : Service() {
     /** Bridge state, observed by the UI. */
     sealed interface State {
         data object Idle : State
+        /** Opening the transport. Can take many seconds on BLE. */
+        data class Connecting(val deviceName: String) : State
         data class Running(val deviceName: String, val port: Int, val flashable: Boolean) : State
         data class Failed(val message: String) : State
     }
@@ -37,6 +47,16 @@ class BridgeService : Service() {
     private val binder = LocalBinder()
     private var transport: Transport? = null
     private var bridge: TcpBridge? = null
+
+    /**
+     * Opening a transport blocks -- a BLE connect waits on GATT round trips,
+     * an RFCOMM connect on the radio -- so it cannot run on the caller's
+     * thread, which is the UI's.
+     */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** The in-flight connect, so Cancel can actually abort it. */
+    private var connectJob: Job? = null
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state
@@ -60,47 +80,91 @@ class BridgeService : Service() {
     /**
      * Opens [newTransport] and starts bridging it on [port].
      *
-     * Any previous link is torn down first: the device speaks to one host at a
-     * time, and leaving a stale transport open blocks the new one.
+     * Returns immediately; watch [state] for the outcome. Any previous link is
+     * torn down first -- the device speaks to one host at a time, and leaving a
+     * stale transport open blocks the new one.
+     *
+     * A second call while one is already in flight is ignored rather than
+     * queued. Opening a transport is slow enough to double-tap through, and
+     * running two opens concurrently would have the second tear down the link
+     * the first had just established.
      */
+    @Synchronized
     fun connect(newTransport: Transport, port: Int = TcpBridge.DEFAULT_PORT) {
-        disconnect()
-        try {
-            newTransport.open()
-        } catch (e: Exception) {
-            _state.value = State.Failed(e.message ?: "Could not open ${newTransport.displayName}")
-            append("[!] ${e.message}")
+        if (_state.value is State.Connecting && connectJob?.isActive == true) {
             return
         }
+        _state.value = State.Connecting(newTransport.displayName)
+        updateNotification(getString(R.string.bridge_connecting, newTransport.displayName))
 
-        val b = TcpBridge(newTransport, port) { event -> onBridgeEvent(event) }
-        try {
-            b.start()
-        } catch (e: Exception) {
-            runCatching { newTransport.close() }
-            _state.value = State.Failed("Could not bind port $port: ${e.message}")
-            return
+        connectJob = scope.launch {
+            disconnectInternal(resetState = false)
+
+            try {
+                newTransport.open()
+            } catch (e: Exception) {
+                runCatching { newTransport.close() }
+                _state.value =
+                    State.Failed(e.message ?: "Could not open ${newTransport.displayName}")
+                append("[!] ${e.message}")
+                updateNotification(getString(R.string.bridge_idle))
+                return@launch
+            }
+
+            // open() blocks and does not observe cancellation, so Cancel is
+            // honoured here instead: drop the link we just made rather than
+            // publishing Running over a user who asked us to stop.
+            if (!isActive) {
+                runCatching { newTransport.close() }
+                return@launch
+            }
+
+            val b = TcpBridge(newTransport, port) { event -> onBridgeEvent(event) }
+            try {
+                b.start()
+            } catch (e: Exception) {
+                runCatching { newTransport.close() }
+                _state.value = State.Failed("Could not bind port $port: ${e.message}")
+                updateNotification(getString(R.string.bridge_idle))
+                return@launch
+            }
+
+            transport = newTransport
+            bridge = b
+            _state.value = State.Running(
+                deviceName = newTransport.displayName,
+                port = b.boundPort,
+                flashable = newTransport.supportsFlashing,
+            )
+            updateNotification(
+                getString(R.string.bridge_running, newTransport.displayName, b.boundPort)
+            )
         }
-
-        transport = newTransport
-        bridge = b
-        _state.value = State.Running(
-            deviceName = newTransport.displayName,
-            port = b.boundPort,
-            flashable = newTransport.supportsFlashing,
-        )
-        updateNotification(
-            getString(R.string.bridge_running, newTransport.displayName, b.boundPort)
-        )
     }
 
+    @Synchronized
     fun disconnect() {
+        // Cancel first: an in-flight connect would otherwise finish and
+        // publish Running over the state this is about to clear.
+        connectJob?.cancel()
+        connectJob = null
+        scope.launch { disconnectInternal(resetState = true) }
+    }
+
+    /**
+     * @param resetState false when a connect is about to publish its own
+     *   state; clearing to Idle first would make the UI flicker back to the
+     *   picker mid-connect.
+     */
+    private fun disconnectInternal(resetState: Boolean) {
         bridge?.stop()
         runCatching { transport?.close() }
         bridge = null
         transport = null
-        _state.value = State.Idle
-        updateNotification(getString(R.string.bridge_idle))
+        if (resetState) {
+            _state.value = State.Idle
+            updateNotification(getString(R.string.bridge_idle))
+        }
     }
 
     val activeTransport: Transport? get() = transport
@@ -154,7 +218,9 @@ class BridgeService : Service() {
     }
 
     override fun onDestroy() {
-        disconnect()
+        connectJob?.cancel()
+        disconnectInternal(resetState = true)
+        scope.cancel()
         super.onDestroy()
     }
 
