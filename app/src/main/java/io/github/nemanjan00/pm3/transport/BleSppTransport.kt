@@ -14,7 +14,6 @@ import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Semaphore
-import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.TimeUnit
 
 /**
@@ -64,8 +63,14 @@ class BleSppTransport(
      * an ordinary command is several chunks -- so firing them back to back
      * delivered a truncated frame and the client reported "Communicating with
      * Proxmark3 device failed".
+     *
+     * A buffered queue, not a SynchronousQueue: offer() on the latter only
+     * succeeds when a consumer is *already* parked in poll(), and a
+     * no-response write completes fast enough that the callback usually
+     * arrives first. The status was dropped, every write then waited out its
+     * full timeout, and the client timed out instead.
      */
-    private val writeComplete = SynchronousQueue<Int>()
+    private val writeComplete = ArrayBlockingQueue<Int>(1)
 
     /** Serialises writers, so two threads cannot interleave their chunks. */
     private val writeLock = Semaphore(1)
@@ -242,7 +247,9 @@ class BleSppTransport(
     ) {
         var attempt = 0
         while (true) {
-            writeComplete.poll() // discard any late completion from before
+            // Drop a completion left over from a previous chunk, so this one
+            // cannot mistake it for its own.
+            writeComplete.clear()
 
             val accepted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 g.writeCharacteristic(
@@ -256,14 +263,18 @@ class BleSppTransport(
             }
 
             if (accepted) {
+                // The stack has queued it, and no-response writes go out in
+                // order -- so ordering is already guaranteed here. Waiting on
+                // the callback is backpressure, not a delivery guarantee, and
+                // a stack that never reports one must not stall every write.
                 val status = try {
                     writeComplete.poll(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                     throw TransportException("Interrupted mid-write")
-                } ?: throw TransportException("Timed out waiting for the BLE write to complete")
+                }
 
-                if (status != BluetoothGatt.GATT_SUCCESS) {
+                if (status != null && status != BluetoothGatt.GATT_SUCCESS) {
                     throw TransportException("BLE write failed (status $status)")
                 }
                 return
@@ -310,7 +321,11 @@ class BleSppTransport(
         private const val PREFERRED_MTU = 517
         private const val ATT_HEADER_BYTES = 3
         private const val INBOUND_QUEUE_DEPTH = 512
-        private const val WRITE_TIMEOUT_MS = 5_000L
+        /**
+         * Backpressure only. Long enough to pace a busy link, short enough
+         * that a stack which never reports completion costs little.
+         */
+        private const val WRITE_TIMEOUT_MS = 400L
         private const val WRITE_ATTEMPTS = 20
         private const val WRITE_RETRY_MS = 5L
         private const val CONNECT_TIMEOUT_MS = 15_000L
