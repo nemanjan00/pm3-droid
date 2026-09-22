@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.bluetooth.BluetoothAdapter
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.content.ServiceConnection
@@ -69,6 +70,19 @@ class MainActivity : ComponentActivity() {
 
     private fun usbPermissionAction() = getString(R.string.usb_permission)
 
+    /**
+     * Bluetooth being switched on or off, from anywhere -- our own prompt, the
+     * quick settings tile, or Settings. Without this the picker keeps showing
+     * a stale adapter state until something else happens to refresh it.
+     */
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                viewModel.refreshDevices()
+            }
+        }
+    }
+
     private val requestPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { viewModel.refreshDevices() }
@@ -103,6 +117,13 @@ class MainActivity : ComponentActivity() {
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
 
+        ContextCompat.registerReceiver(
+            this,
+            bluetoothStateReceiver,
+            IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
+            ContextCompat.RECEIVER_EXPORTED,
+        )
+
         requestPermissions.launch(requiredPermissions())
 
         setContent {
@@ -134,6 +155,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(usbPermissionReceiver) }
+        runCatching { unregisterReceiver(bluetoothStateReceiver) }
         runCatching { unbindService(connection) }
         super.onDestroy()
     }

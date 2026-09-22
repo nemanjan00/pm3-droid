@@ -5,8 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothAdapter
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
@@ -42,6 +45,9 @@ class BridgeService : Service() {
         data class Connecting(val deviceName: String) : State
         data class Running(val deviceName: String, val port: Int, val flashable: Boolean) : State
         data class Failed(val message: String) : State
+
+        /** The link was up and the far end dropped it. */
+        data class Lost(val deviceName: String, val reason: String) : State
     }
 
     private val binder = LocalBinder()
@@ -69,6 +75,32 @@ class BridgeService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
+
+    /**
+     * Switching Bluetooth off does not always surface as a socket or GATT
+     * error in time, so watch the adapter directly -- otherwise the UI keeps
+     * claiming a live link over a radio that is no longer on.
+     */
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != BluetoothAdapter.ACTION_STATE_CHANGED) return
+            val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+            if (state != BluetoothAdapter.STATE_TURNING_OFF && state != BluetoothAdapter.STATE_OFF) {
+                return
+            }
+            val active = transport ?: return
+            if (active.supportsFlashing) return // USB is unaffected
+            onDeviceLost(active.displayName, "Bluetooth was turned off")
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        registerReceiver(
+            bluetoothStateReceiver,
+            IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
+        )
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, buildNotification(getString(R.string.bridge_idle)))
@@ -99,6 +131,11 @@ class BridgeService : Service() {
 
         connectJob = scope.launch {
             disconnectInternal(resetState = false)
+
+            // Registered before open() so a drop during negotiation is caught.
+            newTransport.onDisconnected = { reason ->
+                onDeviceLost(newTransport.displayName, reason)
+            }
 
             try {
                 newTransport.open()
@@ -139,6 +176,28 @@ class BridgeService : Service() {
             updateNotification(
                 getString(R.string.bridge_running, newTransport.displayName, b.boundPort)
             )
+        }
+    }
+
+    /**
+     * The far end went away.
+     *
+     * Tears the link down and says so, rather than leaving the UI and the
+     * notification claiming a device that is not there. Not a Failed state:
+     * the distinction between "could not connect" and "was connected and lost
+     * it" is the difference between checking the pairing and checking whether
+     * the battery died.
+     */
+    @Synchronized
+    private fun onDeviceLost(deviceName: String, reason: String) {
+        if (transport == null && connectJob?.isActive != true) return
+        append("[!] $reason")
+        connectJob?.cancel()
+        connectJob = null
+        scope.launch {
+            disconnectInternal(resetState = false)
+            _state.value = State.Lost(deviceName, reason)
+            updateNotification(reason)
         }
     }
 
@@ -218,6 +277,7 @@ class BridgeService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(bluetoothStateReceiver) }
         connectJob?.cancel()
         disconnectInternal(resetState = true)
         scope.cancel()

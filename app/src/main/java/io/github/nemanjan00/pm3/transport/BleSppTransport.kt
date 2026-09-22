@@ -42,8 +42,16 @@ class BleSppTransport(
     // The bootloader does not bring up the BWM radio.
     override val supportsFlashing = false
 
+    override var onDisconnected: ((String) -> Unit)? = null
+
     private var gatt: BluetoothGatt? = null
     private var spp: BluetoothGattCharacteristic? = null
+
+    /** Set by [close] so our own teardown is not reported as a remote drop. */
+    @Volatile private var closing = false
+
+    /** Only report a drop for a link that actually came up. */
+    @Volatile private var wasConnected = false
 
     /** Notification payloads, drained by [read]. */
     private val inbound = ArrayBlockingQueue<ByteArray>(INBOUND_QUEUE_DEPTH)
@@ -84,6 +92,7 @@ class BleSppTransport(
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 connected = true
+                wasConnected = true
                 connectedLatch.countDown()
                 // Ask for the largest MTU the stack will grant before doing
                 // anything else: at the 23-byte default every Proxmark frame
@@ -96,6 +105,20 @@ class BleSppTransport(
                 servicesLatch.countDown()
                 mtuLatch.countDown()
                 subscribedLatch.countDown()
+
+                // Unblock a writer parked on the completion queue; its link is
+                // gone and it would otherwise wait out its timeout.
+                writeComplete.offer(BluetoothGatt.GATT_FAILURE)
+
+                if (wasConnected && !closing) {
+                    onDisconnected?.invoke(
+                        if (status == GATT_TIMEOUT_STATUS) {
+                            "Proxmark5 went out of range"
+                        } else {
+                            "Proxmark5 disconnected"
+                        }
+                    )
+                }
             }
         }
 
@@ -292,6 +315,7 @@ class BleSppTransport(
     override fun isConnected(): Boolean = connected
 
     override fun close() {
+        closing = true
         connected = false
         runCatching { gatt?.disconnect() }
         runCatching { gatt?.close() }
@@ -316,6 +340,9 @@ class BleSppTransport(
 
         private fun uuid16(short: Int): UUID =
             UUID.fromString(String.format("%08x-0000-1000-8000-00805f9b34fb", short))
+
+        /** Android's status for a supervision-timeout drop, i.e. out of range. */
+        private const val GATT_TIMEOUT_STATUS = 8
 
         private const val DEFAULT_MTU = 23
         private const val PREFERRED_MTU = 517

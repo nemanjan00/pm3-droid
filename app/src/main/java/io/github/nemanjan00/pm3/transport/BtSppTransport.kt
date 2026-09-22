@@ -34,6 +34,11 @@ class BtSppTransport(
     // would drop mid-write and brick the device.
     override val supportsFlashing = false
 
+    override var onDisconnected: ((String) -> Unit)? = null
+
+    /** Set by [close] so our own teardown is not reported as a remote drop. */
+    @Volatile private var closing = false
+
     private var socket: BluetoothSocket? = null
     private var input: InputStream? = null
     private var output: OutputStream? = null
@@ -87,6 +92,9 @@ class BtSppTransport(
             Thread.currentThread().interrupt()
             0
         } catch (e: Exception) {
+            // A remote close surfaces as an IO error on the next read; the
+            // socket has no other signal.
+            reportDropped()
             throw TransportException("BT read failed", e)
         }
     }
@@ -97,13 +105,21 @@ class BtSppTransport(
             stream.write(data)
             stream.flush()
         } catch (e: Exception) {
+            reportDropped()
             throw TransportException("BT write failed", e)
         }
     }
 
     override fun isConnected(): Boolean = socket?.isConnected == true
 
+    private fun reportDropped() {
+        if (closing) return
+        closing = true // report once
+        onDisconnected?.invoke("${device.name ?: device.address} disconnected")
+    }
+
     override fun close() {
+        closing = true
         runCatching { socket?.close() }
         socket = null
         input = null

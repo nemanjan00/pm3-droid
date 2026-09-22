@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -68,7 +69,18 @@ fun Pm3App(viewModel: MainViewModel, serviceBound: Boolean) {
                 }
             },
         ) { padding ->
-            Box(Modifier.padding(padding)) {
+            // consumeWindowInsets is the half that is easy to miss. Scaffold
+            // hands down padding that already covers the bottom bar and the
+            // navigation bar, but it does not mark those insets as consumed --
+            // so a child calling imePadding() adds them a second time, and the
+            // console's input row ends up displaced behind the bottom bar.
+            // Consuming them makes the child's inset maths start from zero.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .consumeWindowInsets(padding)
+            ) {
                 if (!serviceBound) {
                     LoadingPane()
                 } else when (tab) {
@@ -111,6 +123,12 @@ private fun BridgeStatusBar(state: BridgeService.State) {
                 "Bridging on tcp:127.0.0.1:${state.port}" +
                     if (!state.flashable) " · wireless, no flashing" else "",
                 MaterialTheme.colorScheme.primaryContainer,
+            )
+        is BridgeService.State.Lost ->
+            Triple(
+                state.deviceName,
+                state.reason + " — reconnect on the Device tab",
+                MaterialTheme.colorScheme.errorContainer,
             )
         is BridgeService.State.Failed ->
             Triple("Connection failed", state.message, MaterialTheme.colorScheme.errorContainer)

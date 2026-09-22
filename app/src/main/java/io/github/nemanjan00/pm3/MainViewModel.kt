@@ -74,6 +74,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning
 
+    /** Whether the Bluetooth adapter is on, so the UI can say so and offer to fix it. */
+    private val _bluetoothOn = MutableStateFlow(isBluetoothOn())
+    val bluetoothOn: StateFlow<Boolean> = _bluetoothOn
+
+    private fun isBluetoothOn(): Boolean =
+        getApplication<Application>()
+            .getSystemService(android.bluetooth.BluetoothManager::class.java)
+            ?.adapter?.isEnabled == true
+
     /**
      * Stable key of the device being connected, set the instant the row is
      * tapped.
@@ -98,6 +107,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshDevices() {
         val context = getApplication<Application>()
+        _bluetoothOn.value = isBluetoothOn()
         _devices.value = _devices.value.copy(
             usb = UsbTransport.list(context),
             bonded = BtSppTransport.bonded(context),
@@ -107,6 +117,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Scans for a Proxmark5 BWM, which advertises the 0xAE86 SPP service. */
     fun scanBle() {
         if (_scanning.value) return
+        if (!isBluetoothOn()) {
+            _bluetoothOn.value = false
+            append("[!] Bluetooth is off")
+            return
+        }
         _scanning.value = true
         bleScanner.start(
             onResult = { list -> _devices.value = _devices.value.copy(scanned = list) },

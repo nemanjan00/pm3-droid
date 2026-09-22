@@ -17,6 +17,19 @@ interface Transport : Closeable {
     val displayName: String
 
     /**
+     * Invoked when the link drops from the far end -- the device powered off,
+     * went out of range, was unplugged, or the adapter was switched off.
+     *
+     * Polling [isConnected] is not enough on its own: the bridge only reads
+     * the transport while a TCP client is attached, so a device that vanishes
+     * between commands would go unnoticed and the UI would keep claiming a
+     * live link. This fires regardless.
+     *
+     * Never fired for a close this app initiated.
+     */
+    var onDisconnected: ((reason: String) -> Unit)?
+
+    /**
      * Whether firmware can be flashed over this link.
      *
      * USB only. Flashing reboots the device into its bootloader, which does not

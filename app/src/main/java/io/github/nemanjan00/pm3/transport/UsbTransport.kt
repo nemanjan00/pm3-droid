@@ -23,6 +23,10 @@ class UsbTransport(
     // Flashing reboots into the bootloader, which only ever comes back on USB.
     override val supportsFlashing = true
 
+    override var onDisconnected: ((String) -> Unit)? = null
+
+    @Volatile private var closing = false
+
     private var port: UsbSerialPort? = null
 
     override fun open() {
@@ -63,6 +67,8 @@ class UsbTransport(
             // usb-serial-for-android returns 0 on timeout rather than throwing.
             p.read(buffer, timeoutMs)
         } catch (e: Exception) {
+            // Unplugging mid-session shows up as an IO error here.
+            reportDropped()
             throw TransportException("USB read failed", e)
         }
     }
@@ -72,6 +78,7 @@ class UsbTransport(
         try {
             p.write(data, WRITE_TIMEOUT_MS)
         } catch (e: Exception) {
+            reportDropped()
             throw TransportException("USB write failed", e)
         }
     }
@@ -81,7 +88,14 @@ class UsbTransport(
         return manager.deviceList.values.any { it.deviceId == device.deviceId }
     }
 
+    private fun reportDropped() {
+        if (closing) return
+        closing = true // report once
+        onDisconnected?.invoke("${device.productName ?: "Proxmark"} was unplugged")
+    }
+
     override fun close() {
+        closing = true
         runCatching { port?.close() }
         port = null
     }

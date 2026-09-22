@@ -1,6 +1,8 @@
 package io.github.nemanjan00.pm3.ui
 
+import android.bluetooth.BluetoothAdapter
 import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -32,6 +34,7 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
     val busy = state is BridgeService.State.Connecting || state is BridgeService.State.Running
     val connecting = state as? BridgeService.State.Connecting
     val connectingKey by viewModel.connectingKey.collectAsState()
+    val bluetoothOn by viewModel.bluetoothOn.collectAsState()
 
     // The optimistic key is cleared once the service settles, so a failed
     // connect returns every row to its normal state.
@@ -96,6 +99,33 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
             }
         }
 
+        if (!bluetoothOn) {
+            Card(colors = CardDefaults.cardColors(MaterialTheme.colorScheme.errorContainer)) {
+                Row(
+                    Modifier.padding(16.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Bluetooth is off", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Both the Blueshark and the Proxmark5 BWM need it. " +
+                                "USB is unaffected.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    TextButton(onClick = {
+                        // The system dialog, rather than enabling it silently:
+                        // turning a user's radio on without asking is not ours
+                        // to do, and BLUETOOTH_CONNECT would be needed anyway.
+                        context.startActivity(
+                            Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }) { Text("Turn on") }
+                }
+            }
+        }
+
         SectionCard(
             title = "Bluetooth classic",
             subtitle = "Blueshark on a PM3. Pair in Android settings first. " +
@@ -107,7 +137,7 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
             devices.bonded.forEach { device ->
                 DeviceRow(
                     icon = Icons.Filled.Bluetooth,
-                    enabled = !busy,
+                    enabled = !busy && bluetoothOn,
                     title = device.name ?: device.address,
                     subtitle = if (BtSppTransport.looksLikeProxmark(device))
                         "${device.address} · looks like a Proxmark"
@@ -131,7 +161,7 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
                     icon = Icons.AutoMirrored.Filled.BluetoothSearching,
                     title = device.name ?: device.address,
                     subtitle = device.address,
-                    enabled = !busy,
+                    enabled = !busy && bluetoothOn,
                     connecting = connectingKey == device.address,
                     onClick = { viewModel.connectBle(device) },
                 )
@@ -148,7 +178,7 @@ fun DeviceScreen(viewModel: MainViewModel, state: BridgeService.State) {
             } else {
                 OutlinedButton(
                     onClick = { viewModel.scanBle() },
-                    enabled = !busy,
+                    enabled = !busy && bluetoothOn,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.BluetoothSearching, contentDescription = null)

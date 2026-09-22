@@ -44,9 +44,18 @@ class BleScanner(private val context: Context) {
         onResult: (List<BluetoothDevice>) -> Unit,
         onFinished: () -> Unit = {},
     ) {
-        val adapter = adapterOf(context) ?: return
-        if (!adapter.isEnabled) return
-        val scanner = adapter.bluetoothLeScanner ?: return
+        // Every early exit must call onFinished. Returning silently left the
+        // caller's "scanning" flag stuck on, and the spinner with it.
+        val adapter = adapterOf(context)
+        if (adapter == null || !adapter.isEnabled) {
+            onFinished()
+            return
+        }
+        val scanner = adapter.bluetoothLeScanner
+        if (scanner == null) {
+            onFinished()
+            return
+        }
         if (callback != null) return
 
         found.clear()
