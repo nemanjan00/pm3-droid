@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -205,6 +206,39 @@ fun ConsoleScreen(viewModel: MainViewModel, state: BridgeService.State) {
 
     // imePadding: without it the keyboard covers the very input field it was
     // opened for, which on a console is the whole interaction.
+    ConsoleContent(
+        lines = lines,
+        enabled = state is BridgeService.State.Running,
+        input = input,
+        onInputChange = { input = it },
+        listState = listState,
+        onSend = { viewModel.send(it) },
+        onCopyAll = { copy(lines.joinToString("\n"), "console output") },
+        onCopyLine = { copy(it, "line") },
+        onClear = { viewModel.clearConsole() },
+    )
+}
+
+/**
+ * The console layout, with no ViewModel.
+ *
+ * Split out so it can be rendered in a test: the input row disappearing behind
+ * the bottom bar was found by hand, twice, because nothing here was checkable
+ * without a phone.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ConsoleContent(
+    lines: List<String>,
+    enabled: Boolean,
+    input: String,
+    onInputChange: (String) -> Unit,
+    listState: LazyListState = rememberLazyListState(),
+    onSend: (String) -> Unit,
+    onCopyAll: () -> Unit,
+    onCopyLine: (String) -> Unit,
+    onClear: () -> Unit,
+) {
     Column(Modifier.fillMaxSize().imePadding()) {
 
         Row(
@@ -216,27 +250,34 @@ fun ConsoleScreen(viewModel: MainViewModel, state: BridgeService.State) {
                 Modifier.weight(1f),
                 style = MaterialTheme.typography.labelMedium,
             )
-            TextButton(
-                onClick = { copy(lines.joinToString("\n"), "console output") },
-                enabled = lines.isNotEmpty(),
-            ) {
+            TextButton(onClick = onCopyAll, enabled = lines.isNotEmpty()) {
                 Icon(Icons.Filled.ContentCopy, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
                 Text("Copy all")
             }
-            TextButton(onClick = { viewModel.clearConsole() }, enabled = lines.isNotEmpty()) {
+            TextButton(onClick = onClear, enabled = lines.isNotEmpty()) {
                 Text("Clear")
             }
         }
 
         // SelectionContainer gives the ordinary Android drag-to-select gesture
         // across the log, for pulling out a single UID rather than the lot.
-        SelectionContainer(Modifier.weight(1f)) {
+        // The weight sits on a plain Box, not on SelectionContainer.
+        // SelectionContainer wraps its content in its own layout, and relying
+        // on that to carry a weighted height is what pushed the input row off
+        // the bottom of the screen -- the log took the full height and the row
+        // below it had nowhere to go.
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+        ) {
+          SelectionContainer {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface)
                     .padding(horizontal = 8.dp),
             ) {
                 items(lines) { line ->
@@ -247,7 +288,7 @@ fun ConsoleScreen(viewModel: MainViewModel, state: BridgeService.State) {
                         // case gets a gesture of its own.
                         modifier = Modifier.combinedClickable(
                             onClick = {},
-                            onLongClick = { copy(line, "line") },
+                            onLongClick = { onCopyLine(line) },
                         ),
                         fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp,
@@ -255,28 +296,32 @@ fun ConsoleScreen(viewModel: MainViewModel, state: BridgeService.State) {
                     )
                 }
             }
+          }
         }
 
         Row(
-            Modifier.fillMaxWidth().padding(8.dp),
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             OutlinedTextField(
                 value = input,
-                onValueChange = { input = it },
+                onValueChange = onInputChange,
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("hw status") },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = {
-                    if (input.isNotBlank()) { viewModel.send(input.trim()); input = "" }
+                    if (input.isNotBlank()) { onSend(input.trim()); onInputChange("") }
                 }),
             )
             Spacer(Modifier.width(8.dp))
             FilledIconButton(
-                onClick = { if (input.isNotBlank()) { viewModel.send(input.trim()); input = "" } },
-                enabled = state is BridgeService.State.Running,
+                onClick = { if (input.isNotBlank()) { onSend(input.trim()); onInputChange("") } },
+                enabled = enabled,
             ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
         }
     }

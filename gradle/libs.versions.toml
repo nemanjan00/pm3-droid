@@ -8,6 +8,7 @@ composeBom = "2024.12.01"
 usbSerial = "3.8.1"
 junit = "4.13.2"
 json = "20240303"
+robolectric = "4.13"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -24,6 +25,9 @@ androidx-compose-material-icons = { group = "androidx.compose.material", name = 
 usbserial = { group = "com.github.mik3y", name = "usb-serial-for-android", version.ref = "usbSerial" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 json = { group = "org.json", name = "json", version.ref = "json" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

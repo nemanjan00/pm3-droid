@@ -94,6 +94,7 @@ android {
 
     testOptions {
         unitTests {
+            isIncludeAndroidResources = true
             // TagParser scrapes the client's printed output; the samples in
             // the tests are real client text, so these run on the JVM with no
             // device and no Android framework stubs needed.
@@ -123,4 +124,11 @@ dependencies {
     // isReturnDefaultValues, so JSONObject silently parses to empty. The real
     // implementation makes the framing tests exercise real parsing.
     testImplementation(libs.json)
+    // Renders Compose on the JVM, so layout bugs are caught here rather than
+    // on a phone. The console's input row going missing was found by hand
+    // twice before this existed.
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
