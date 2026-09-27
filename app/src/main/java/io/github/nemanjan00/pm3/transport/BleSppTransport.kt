@@ -39,8 +39,8 @@ class BleSppTransport(
     override val displayName: String
         get() = "${device.name ?: device.address} (BLE)"
 
-    // The bootloader does not bring up the BWM radio.
-    override val supportsFlashing = false
+    // A radio.
+    override val isWireless = true
 
     override var onDisconnected: ((String) -> Unit)? = null
 

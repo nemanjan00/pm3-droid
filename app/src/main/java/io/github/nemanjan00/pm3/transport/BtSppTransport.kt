@@ -31,8 +31,8 @@ class BtSppTransport(
         get() = "${device.name ?: device.address} (BT)"
 
     // The bootloader does not bring up the Blueshark radio, so a flash over BT
-    // would drop mid-write and brick the device.
-    override val supportsFlashing = false
+    // A radio.
+    override val isWireless = true
 
     override var onDisconnected: ((String) -> Unit)? = null
 

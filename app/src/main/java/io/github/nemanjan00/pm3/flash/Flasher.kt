@@ -40,6 +40,7 @@ class Flasher(private val runtime: Pm3Runtime) {
         address: String,
         image: File,
         bootloader: Boolean = false,
+        wireless: Boolean = true,
     ): Flow<Progress> = callbackFlow {
         require(image.isFile) { "No such image: ${image.absolutePath}" }
 
@@ -57,7 +58,9 @@ class Flasher(private val runtime: Pm3Runtime) {
 
         val process = ProcessBuilder(args)
             .directory(runtime.home)
-            .also { it.environment().putAll(runtime.environment()) }
+            // The client would otherwise read the loopback address as a
+            // wireless link and refuse to flash a USB-attached device.
+            .also { it.environment().putAll(runtime.environment(wireless)) }
             .redirectErrorStream(true)
             .start()
 

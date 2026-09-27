@@ -294,7 +294,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         stopSession()
 
         viewModelScope.launch {
-            Flasher(runtime).flash("tcp:127.0.0.1:${state.port}", image, bootloader)
+            Flasher(runtime).flash(
+                address = "tcp:127.0.0.1:${state.port}",
+                image = image,
+                bootloader = bootloader,
+                // Taken from the live transport, not from the address.
+                wireless = !state.flashable,
+            )
                 .collect { progress ->
                     _flashProgress.value = progress
                     if (progress is Flasher.Progress.Line) append(progress.text)

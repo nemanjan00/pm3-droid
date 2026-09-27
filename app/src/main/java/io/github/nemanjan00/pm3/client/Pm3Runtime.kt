@@ -94,8 +94,21 @@ class Pm3Runtime(private val context: Context) {
         }
     }
 
-    /** Environment for a client process: HOME plus a sane terminal. */
-    fun environment(): Map<String, String> = mapOf(
+    /**
+     * Environment for a client process.
+     *
+     * @param wireless the real link type, or null when it is not known. Null
+     *   leaves PM3_LINK_WIRELESS unset, and the client falls back to inferring
+     *   from the port string -- which, since the bridge always hands it a
+     *   loopback socket, means "wireless". That is the safe way to be wrong:
+     *   it refuses a flash rather than permitting one over a radio.
+     */
+    fun environment(wireless: Boolean? = null): Map<String, String> = buildMap {
+        putAll(baseEnvironment)
+        if (wireless != null) put("PM3_LINK_WIRELESS", if (wireless) "1" else "0")
+    }
+
+    private val baseEnvironment: Map<String, String> = mapOf(
         "HOME" to home.absolutePath,
         // The client enables ANSI colour only when stdin *and* stdout are
         // both TTYs (proxmark3.c), and we always spawn it on pipes -- so its

@@ -1,0 +1,39 @@
+Subject: [PATCH] flash: let the host state whether the link is wireless
+
+port_is_wireless() infers the link type from the port string. That is
+right for a normal client, but wrong under a bridge that terminates the
+real link itself and hands the client a loopback socket: USB, BT-classic
+and BLE all present as "tcp:", so a USB-attached device is refused as
+wireless and cannot be flashed at all.
+
+PM3_LINK_WIRELESS lets the host say which it is. pm3-droid sets it from
+the live transport, so a genuine wireless link still reports itself as
+wireless and the bootloader guard still fires. Unset or unrecognised
+falls through to the original inference.
+
+--- a/client/src/flash.c
++++ b/client/src/flash.c
+@@ -463,6 +463,23 @@
+ }
+ 
+ static bool port_is_wireless(const char *name) {
++    // PM3_LINK_WIRELESS: the host states the link type when it knows it.
++    //
++    // Inferring it from the port string breaks under a bridge that
++    // terminates the real link itself and hands this client a loopback
++    // socket -- USB, BT-classic and BLE then all present as "tcp:", so a
++    // USB-attached device is refused as wireless and cannot be flashed at
++    // all. The Android app sets this from the transport it actually opened.
++    //
++    // This makes the guard accurate, not absent: a wireless link sets 1 and
++    // is still refused by a bootloader that cannot stream over one. An unset
++    // or unrecognised value falls through to the inference below, so a normal
++    // build is unaffected.
++    const char *forced = getenv("PM3_LINK_WIRELESS");
++    if (forced != NULL && (forced[0] == '0' || forced[0] == '1') && forced[1] == '\0') {
++        return forced[0] == '1';
++    }
++
+     if (name == NULL) {
+         return false;
+     }

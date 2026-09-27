@@ -20,8 +20,8 @@ class UsbTransport(
     override val displayName: String
         get() = "${device.productName ?: "Proxmark"} (USB)"
 
-    // Flashing reboots into the bootloader, which only ever comes back on USB.
-    override val supportsFlashing = true
+    // A cable.
+    override val isWireless = false
 
     override var onDisconnected: ((String) -> Unit)? = null
 

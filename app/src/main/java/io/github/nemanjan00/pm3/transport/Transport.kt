@@ -30,14 +30,26 @@ interface Transport : Closeable {
     var onDisconnected: ((reason: String) -> Unit)?
 
     /**
+     * Whether this link is a radio rather than a cable.
+     *
+     * The client cannot work this out for itself here. It infers the link type
+     * from the port string, and the bridge hands it a loopback socket for
+     * every transport, so everything looks wireless to it. This is passed down
+     * as PM3_LINK_WIRELESS so its bootloader guard judges the real link.
+     */
+    val isWireless: Boolean
+
+    /**
      * Whether firmware can be flashed over this link.
      *
-     * USB only. Flashing reboots the device into its bootloader, which does not
-     * bring up the Blueshark/BWM radio, so a wireless link drops mid-flash and
-     * leaves the device half-written. Upstream's termux notes are explicit that
-     * flashing is "possible only via USB-UART, *not* via BT-UART".
+     * USB only, and derived from [isWireless] rather than stated separately so
+     * the two cannot drift apart. Flashing reboots the device into its
+     * bootloader, which does not bring up the Blueshark/BWM radio, so a
+     * wireless link drops mid-flash and leaves the device half-written.
+     * Upstream's termux notes are explicit that flashing is "possible only via
+     * USB-UART, *not* via BT-UART".
      */
-    val supportsFlashing: Boolean
+    val supportsFlashing: Boolean get() = !isWireless
 
     /** Opens the link. Throws [TransportException] if the device is unreachable. */
     fun open()
