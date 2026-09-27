@@ -23,8 +23,17 @@ class Flasher(private val runtime: Pm3Runtime) {
     sealed interface Progress {
         data class Line(val text: String) : Progress
         /** [fraction] in 0..1, or null when the client reports no percentage. */
-        data class Step(val label: String, val fraction: Float?) : Progress
-        data class Finished(val success: Boolean, val message: String) : Progress
+        data class Step(
+            val label: String,
+            val fraction: Float?,
+            val stage: FlashProgressParser.Stage? = null,
+        ) : Progress
+        data class Finished(
+            val success: Boolean,
+            val message: String,
+            /** Present on failure: what went wrong and what to do about it. */
+            val failure: FlashProgressParser.Failure? = null,
+        ) : Progress
     }
 
     /**
@@ -66,50 +75,54 @@ class Flasher(private val runtime: Pm3Runtime) {
 
         val reader = process.inputStream.bufferedReader()
         var sawError = false
+        var failure: FlashProgressParser.Failure? = null
+        var stage: FlashProgressParser.Stage? = null
 
         reader.forEachLine { line ->
             trySend(Progress.Line(line))
-            parseProgress(line)?.let { trySend(it) }
+
+            // Stages only advance. The "Waiting for Proxmark3" line appears
+            // both before and after the reboot, so taking it at face value
+            // would walk the stepper backwards halfway through a flash.
+            FlashProgressParser.stageOf(line)?.let { seen ->
+                if (stage == null || seen.ordinal > stage!!.ordinal) stage = seen
+            }
+            // Keep the first failure: later lines are usually its fallout, and
+            // the first one names the actual cause.
+            if (failure == null) failure = FlashProgressParser.failureOf(line)
+
+            val pct = FlashProgressParser.percentOf(line)
+            if (pct != null || FlashProgressParser.stageOf(line) != null) {
+                trySend(
+                    Progress.Step(
+                        label = stage?.label ?: "Flashing",
+                        fraction = pct?.let { it / 100f },
+                        stage = stage,
+                    )
+                )
+            }
             if (ERROR_MARKERS.any { line.contains(it) }) sawError = true
         }
 
         val code = process.waitFor()
-        val ok = code == 0 && !sawError
+        val ok = code == 0 && !sawError && failure == null
         trySend(
             Progress.Finished(
                 success = ok,
                 message = if (ok) {
-                    "Flash complete. The device reboots and re-enumerates on USB; " +
-                        "reconnect the bridge before using it."
+                    "Flash complete. The device reboots and re-enumerates on " +
+                        "USB, so reconnect on the Device tab before using it."
                 } else {
-                    "Flash failed (exit $code). The device is most likely still in " +
-                        "bootloader mode -- it is safe to retry."
+                    failure?.summary ?: "The flash did not complete (exit $code)."
                 },
+                failure = failure,
             )
         )
         close()
         awaitClose { process.destroy() }
     }.flowOn(Dispatchers.IO)
 
-    /**
-     * Pulls a percentage out of the client's flash output.
-     *
-     * The client prints a bar like `[=] Writing... 42%`, so the percent sign is
-     * the reliable anchor; the label is whatever precedes it.
-     */
-    private fun parseProgress(line: String): Progress.Step? {
-        val match = PERCENT.find(line) ?: return null
-        val pct = match.groupValues[1].toFloatOrNull() ?: return null
-        val label = line.substringBefore(match.value)
-            .trim()
-            .removePrefix("[=]").removePrefix("[+]").removePrefix("[#]")
-            .trim()
-            .ifEmpty { "Flashing" }
-        return Progress.Step(label, (pct / 100f).coerceIn(0f, 1f))
-    }
-
     companion object {
-        private val PERCENT = Regex("""(\d{1,3})\s*%""")
 
         private val ERROR_MARKERS = listOf(
             "[!!]",

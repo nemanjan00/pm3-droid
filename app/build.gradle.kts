@@ -27,8 +27,8 @@ android {
         // and BLE APIs this relies on are all present from there.
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 5
+        versionName = "0.1.4"
 
         ndk {
             // Only the ABIs native/build-pm3.sh produces a client for. Shipping

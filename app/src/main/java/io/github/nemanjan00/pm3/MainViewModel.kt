@@ -304,7 +304,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .collect { progress ->
                     _flashProgress.value = progress
                     if (progress is Flasher.Progress.Line) append(progress.text)
-                    if (progress is Flasher.Progress.Finished) append("[=] ${progress.message}")
+                    if (progress is Flasher.Progress.Finished) {
+                        append("[=] ${progress.message}")
+                        progress.failure?.let { append("[=] ${it.whatToDo}") }
+                    }
                 }
         }
     }
