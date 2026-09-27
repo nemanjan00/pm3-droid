@@ -27,6 +27,7 @@ import java.net.URL
 class FirmwareRepository(
     private val context: Context,
     private val releaseBase: String = DEFAULT_RELEASE_BASE,
+    private val fallbackReleaseBase: String? = NIGHTLY_RELEASE_BASE,
 ) {
 
     sealed interface Progress {
@@ -56,19 +57,41 @@ class FirmwareRepository(
 
         send(Progress.Status("Fetching manifest\u2026"))
         val manifestFile = FirmwareCatalog.manifestFile(context)
-        try {
-            // Staged via a temp file so an interrupted fetch cannot leave a
-            // half-written manifest that parses to a shorter variant list.
-            val tmp = File(dir, "manifest.json.part")
-            download(URL("$releaseBase/manifest.json"), tmp) { }
-            // Parse before committing: a 404 page saved as JSON is worse than
-            // no manifest at all.
-            JSONObject(tmp.readText()).optJSONArray("variants")
-                ?: throw IOException("Manifest has no variants array")
-            commit(tmp, manifestFile)
-        } catch (e: Exception) {
-            send(Progress.Failed("Could not fetch manifest: ${e.message}"))
+        val tmp = File(dir, "manifest.json.part")
+
+        // Try the stable release first, then the nightly. GitHub serves 404
+        // for /releases/latest until a non-prerelease exists, so on a project
+        // that has only ever published nightlies the stable URL is simply not
+        // there yet -- falling back means firmware works before the first tag,
+        // and switches to released images the moment one is cut.
+        var base: String? = null
+        var lastError: String? = null
+        for (candidate in listOf(releaseBase, fallbackReleaseBase)) {
+            if (candidate == null) continue
+            try {
+                // Staged via a temp file so an interrupted fetch cannot leave
+                // a half-written manifest that parses to a shorter list.
+                download(URL("$candidate/manifest.json"), tmp) { }
+                // Parse before committing: a 404 page saved as JSON is worse
+                // than no manifest at all.
+                JSONObject(tmp.readText()).optJSONArray("variants")
+                    ?: throw IOException("Manifest has no variants array")
+                base = candidate
+                break
+            } catch (e: Exception) {
+                tmp.delete()
+                lastError = e.message
+            }
+        }
+
+        if (base == null) {
+            send(Progress.Failed("Could not fetch manifest: $lastError"))
             return@channelFlow
+        }
+        commit(tmp, manifestFile)
+
+        if (base != releaseBase) {
+            send(Progress.Status("No released firmware yet \u2014 using the nightly build"))
         }
 
         val wanted = FirmwareCatalog.load(context)
@@ -89,7 +112,10 @@ class FirmwareRepository(
             try {
                 // Release assets are flattened with the variant in the name,
                 // matching the workflow's release step.
-                download(URL("$releaseBase/fullimage-${variant.id}.elf"), tmp) { fraction ->
+                // Same release as the manifest: a manifest from one release
+                // and an image from another would fail verification even
+                // though both are intact.
+                download(URL("$base/fullimage-${variant.id}.elf"), tmp) { fraction ->
                     trySend(Progress.Downloading(variant.id, fraction))
                 }
             } catch (e: Exception) {
