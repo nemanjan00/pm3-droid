@@ -55,6 +55,29 @@ object TagParser {
         val passwordSet: Boolean get() = fields["Password set"]?.startsWith("Yes") == true
     }
 
+    /**
+     * `hw status`, which prints a long sectioned report.
+     *
+     * Kept as sections of ordered label/value pairs rather than named fields:
+     * what appears depends on the board, the firmware build and whether a BWM
+     * is fitted, and a row we do not recognise is still worth showing.
+     */
+    data class Status(val sections: Map<String, Map<String, String>>) {
+        val isEmpty: Boolean get() = sections.isEmpty()
+
+        operator fun get(section: String): Map<String, String> =
+            sections[section] ?: emptyMap()
+
+        /** Battery rows, the part that matters most on a wireless session. */
+        val battery: Map<String, String> get() = this["Battery / BWM"]
+
+        val batteryPercent: Int?
+            get() = battery["Battery SoC"]?.substringBefore('%')?.trim()?.toIntOrNull()
+
+        val charging: Boolean
+            get() = battery["Charge status"]?.contains("charging", ignoreCase = true) == true
+    }
+
     data class Antenna(
         val lfVoltage: String?,
         val lfOptimalDivisor: String?,
@@ -149,11 +172,62 @@ object TagParser {
         return T55xx(fields)
     }
 
+    /**
+     * Parses the sectioned report from `hw status`.
+     *
+     * Section headers sit flush against the marker ("[#] Memory"); their rows
+     * are indented and use a dotted leader ("[#]   Available memory... 405920").
+     * Indentation is what separates the two, so it must survive marker
+     * stripping -- which is why this does not reuse the T55xx row parser.
+     *
+     * The T55xx timing table in the middle is neither, and is skipped: it is a
+     * grid, not key/value, and forcing it into one would produce nonsense.
+     */
+    fun hwStatus(output: String): Status {
+        val sections = LinkedHashMap<String, LinkedHashMap<String, String>>()
+        var current: String? = null
+
+        for (raw in output.lineSequence()) {
+            val match = STATUS_MARKER.find(raw) ?: continue
+            val body = raw.substring(match.value.length).trimEnd()
+            if (body.isBlank()) continue
+
+            val indented = body.startsWith(" ")
+            val line = body.trim()
+            if (line.startsWith("-") || line.startsWith("|")) continue // table rules
+
+            if (!indented) {
+                current = line
+                sections.getOrPut(current) { LinkedHashMap() }
+                continue
+            }
+
+            val row = DOTTED.find(line) ?: continue
+            val label = row.groupValues[1].trim().trimEnd('.').trim()
+            val value = row.groupValues[2].trim()
+            if (label.isEmpty() || value.isEmpty()) continue
+
+            // A row before any header still belongs somewhere.
+            val key = current ?: "Status"
+            sections.getOrPut(key) { LinkedHashMap() }[label] = value
+        }
+
+        // Headers whose rows were all skipped carry no information.
+        sections.entries.removeAll { it.value.isEmpty() }
+        return Status(sections)
+    }
+
     /** True when the client reported no tag rather than an error. */
     fun foundNothing(output: String): Boolean =
         output.contains("No known 125/134 kHz tags found") ||
             output.contains("No data found") ||
             output.contains("Unknown") && !output.contains("Valid")
+
+    /**
+     * The status marker only. Matched separately from [MARKER] because the
+     * indentation after it is significant here, so it must not be trimmed.
+     */
+    private val STATUS_MARKER = Regex("""^\s*\[#\] """)
 
     /** The client's "[=] " / "[+] " severity marker. */
     private val MARKER = Regex("""^\s*\[[=+!\-]{1,2}\]\s*""")

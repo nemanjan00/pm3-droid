@@ -183,6 +183,32 @@ private fun ResultCard(result: MainViewModel.ActionResult, onDismiss: () -> Unit
                 }
             }
 
+            result.status?.let { st ->
+                st.batteryPercent?.let { pct ->
+                    // Front and centre: on a wireless session the battery is
+                    // the thing that ends it, and it is buried in the middle
+                    // of a very long report.
+                    Column {
+                        Text(
+                            "Battery ${'$'}pct%" + if (st.charging) " · charging" else "",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        LinearProgressIndicator(
+                            progress = { pct / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                st.sections.forEach { (section, rows) ->
+                    Text(
+                        section,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    rows.forEach { (label, value) -> Field(label, value) }
+                }
+            }
+
             result.antenna?.let { a ->
                 Field("LF voltage", a.lfVoltage)
                 Field("LF optimal divisor", a.lfOptimalDivisor)

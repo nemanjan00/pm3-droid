@@ -62,6 +62,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val hf: TagParser.HfTag? = null,
         val antenna: TagParser.Antenna? = null,
         val t55xx: TagParser.T55xx? = null,
+        val status: TagParser.Status? = null,
         val failed: Boolean = false,
     )
 
@@ -345,7 +346,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val hf = TagParser.hf14aInfo(output).takeIf { !it.isEmpty }
         val antenna = if (action.id == "hw_tune") TagParser.hwTune(output) else null
         val t55 = TagParser.t55xx(output).takeIf { !it.isEmpty && action.id.startsWith("lf_t55") }
-        return ActionResult(action, output, lf, hf, antenna, t55, failed)
+        val status = TagParser.hwStatus(output).takeIf { !it.isEmpty }
+        return ActionResult(action, output, lf, hf, antenna, t55, status, failed)
     }
 
     fun clearConsole() {
