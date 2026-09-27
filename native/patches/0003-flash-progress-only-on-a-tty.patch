@@ -1,0 +1,58 @@
+Subject: [PATCH] flash: only animate progress onto a real terminal
+
+The flash progress display is cursor-addressed truecolor redrawn at
+30 fps, and it runs whenever a segment exceeds 50 blocks with no check
+that stdout is a terminal.
+
+Written to a pipe that is unreadable noise, and at a few hundred KB/s it
+can fill the pipe faster than the reader drains it. The client then
+blocks in write() and stops servicing the device link, so the flash
+stalls with "No ACK from bootloader (timeout)" on a link that is
+otherwise healthy.
+
+Gated on g_session.stdoutOnTTY, which the client already computes.
+
+--- a/client/src/flash.c
++++ b/client/src/flash.c
+@@ -1027,7 +1027,15 @@
+         void (*old_sigint)(int) = SIG_ERR;
+         void (*old_sigwinch)(int) = SIG_ERR;
+ 
+-        if (blocks > 50) {
++        // Only animate onto a real terminal. The progress display is
++        // cursor-addressed truecolor redrawn at 30 fps; written to a pipe it
++        // is unreadable noise, and at a few hundred KB/s it can fill the pipe
++        // faster than the reader drains it. The client then blocks in write()
++        // and stops servicing the device, so the flash stalls with "No ACK
++        // from bootloader" on a link that is otherwise fine.
++        bool animate = (blocks > 50) && g_session.stdoutOnTTY;
++
++        if (animate) {
+ 
+             old_sigint = signal(SIGINT, hadouken_on_sigint);
+ #ifndef _WIN32
+@@ -1045,7 +1053,7 @@
+             }
+ 
+             if (write_block(baddr, ctx->ver_info->magic, data, block_size, flash_dev) < 0) {
+-                if (blocks > 50) {
++                if (animate) {
+                     hadouken_stop();
+                     restore_progress_signals(old_sigint, old_sigwinch);
+                 }
+@@ -1058,13 +1066,13 @@
+             length -= block_size;
+             block++;
+ 
+-            if (blocks > 50) {
++            if (animate) {
+                 pct = (int)(block * 100) / blocks;
+                 hadouken_set_progress(pct);
+             }
+         }
+ 
+-        if (blocks > 50) {
++        if (animate) {
+             hadouken_stop();
+             restore_progress_signals(old_sigint, old_sigwinch);
+         }
